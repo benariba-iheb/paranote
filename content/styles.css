@@ -1,0 +1,32 @@
+/* content/styles.css - Host page styling */
+
+/* A more professional highlight style: Left border + transparent background on hover */
+.paranote-highlighted {
+  border-left: 4px solid #34a853 !important; /* Solid green bar */
+  padding-left: 10px !important;
+  transition: background-color 0.2s ease;
+}
+
+.paranote-highlighted:hover {
+  background-color: rgba(52, 168, 83, 0.05) !important; /* Extremely subtle green tint on hover */
+}
+
+/* Existing trigger button style (ensure it's clean) */
+.paranote-trigger-btn {
+  position: absolute;
+  z-index: 2147483647; 
+  cursor: pointer;
+  background: #202124;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  transition: opacity 0.2s ease;
+  pointer-events: auto;
+}
+
+.paranote-trigger-btn:hover {
+  background: #3c4043;
+}
