@@ -4,9 +4,11 @@
   "version": "1.0.0",
   "description": "Attach context-aware notes to any paragraph on the web.",
   "permissions": [
+    "unlimitedStorage",
     "storage",
     "activeTab",
-    "scripting"
+    "scripting",
+    "identity" 
   ],
   "host_permissions": [
     "<all_urls>"
@@ -24,5 +26,11 @@
       "js": ["content/content.js"],
       "css": ["content/styles.css"]
     }
-  ]
+  ],
+  "oauth2": {
+    "client_id": "400263042707-thop12p3p7g2rrlggpvv8ll2tnboe50h.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/drive.appdata"
+    ]
+  }
 }

@@ -13,12 +13,21 @@ class ParaNoteEditor {
     this.hostElement.style.cssText = 'display: none; position: absolute; z-index: 2147483647; pointer-events: auto;';
     this.shadowRoot = this.hostElement.attachShadow({ mode: 'open' });
     this.currentHash = null;
+    this.currentScreenshot = null;
 
     this.shadowRoot.innerHTML = `
       <style>
         .editor-container { background: #fff; border: 1px solid #dadce0; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); width: 300px; padding: 12px; display: flex; flex-direction: column; gap: 8px; font-family: sans-serif; box-sizing: border-box;}
         textarea { width: 100%; height: 80px; border: 1px solid #ccc; border-radius: 4px; padding: 8px; font-size: 14px; box-sizing: border-box; resize: vertical; background: transparent; color: #202124;}
-        .actions { display: flex; justify-content: flex-end; gap: 8px; }
+        .preview-container { position: relative; width: 100%; display: none; }
+        .preview-img { max-width: 100%; max-height: 120px; border-radius: 4px; object-fit: contain; background: #f1f3f4; border: 1px solid #e8eaed; display: block; margin: 0 auto; }
+        .btn-remove-img { position: absolute; top: -8px; right: -8px; background: #ea4335; color: white; border: none; border-radius: 50%; width: 22px; height: 22px; font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+        .btn-remove-img:hover { background: #c5221f; }
+        .actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+        .right-actions { display: flex; gap: 8px; }
+        .file-upload-label { font-size: 13px; color: #1a73e8; cursor: pointer; display: flex; align-items: center; gap: 4px; font-weight: 500;}
+        .file-upload-label:hover { text-decoration: underline; }
+        #image-upload { display: none; }
         button { cursor: pointer; padding: 6px 12px; border: none; border-radius: 4px; font-size: 13px; font-weight: 500;}
         .btn-cancel { background: transparent; color: #5f6368; }
         .btn-cancel:hover { background: rgba(0,0,0,0.05); }
@@ -27,48 +36,173 @@ class ParaNoteEditor {
         @media (prefers-color-scheme: dark) {
           .editor-container { background: #202124; border-color: #5f6368; color: #e8eaed;}
           textarea { border-color: #5f6368; color: #e8eaed;}
+          .preview-img { background: #303134; border-color: #5f6368; }
           .btn-cancel { color: #80868b; }
           .btn-cancel:hover { background: rgba(255,255,255,0.05); }
+          .file-upload-label { color: #8ab4f8; }
         }
       </style>
       <div class="editor-container">
-        <textarea id="note-input" placeholder="Type your note for this paragraph..."></textarea>
+        <textarea id="note-input" placeholder="Type a note or paste an image from clipboard..."></textarea>
+        <div id="preview-wrapper" class="preview-container" style="margin-top: 4px;">
+          <img id="preview-img" class="preview-img" alt="Screenshot preview" />
+          <button id="btn-remove-img" class="btn-remove-img" title="Remove Image">✕</button>
+        </div>
         <div class="actions">
-          <button class="btn-cancel" id="btn-cancel">Cancel</button>
-          <button class="btn-save" id="btn-save">Save Note</button>
+          <label class="file-upload-label" for="image-upload">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+            Attach Image
+          </label>
+          <input type="file" id="image-upload" accept="image/*" />
+          <div class="right-actions">
+            <button class="btn-cancel" id="btn-cancel">Cancel</button>
+            <button class="btn-save" id="btn-save">Save Note</button>
+          </div>
         </div>
       </div>
     `;
 
+    const noteInput = this.shadowRoot.getElementById('note-input');
+    noteInput.addEventListener('paste', (e) => {
+      const items = e.clipboardData.items;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          const file = items[i].getAsFile();
+          if (!file) continue;
+          
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const dataUrl = event.target.result;
+            this.currentScreenshot = dataUrl;
+            const previewImg = this.shadowRoot.getElementById('preview-img');
+            const previewWrapper = this.shadowRoot.getElementById('preview-wrapper');
+            previewImg.src = dataUrl;
+            previewWrapper.style.display = 'block';
+          };
+          reader.readAsDataURL(file);
+        }
+      }
+    });
+
     this.shadowRoot.getElementById('btn-cancel').addEventListener('click', () => this.close());
     this.shadowRoot.getElementById('btn-save').addEventListener('click', () => this.saveNote());
+    this.shadowRoot.getElementById('btn-remove-img').addEventListener('click', () => this.removeScreenshot());
+    this.shadowRoot.getElementById('image-upload').addEventListener('change', (e) => this.handleImageUpload(e));
     document.body.appendChild(this.hostElement);
   }
 
-  open(hash, x, y, existingText = "") {
-    this.currentHash = hash;
-    this.hostElement.style.display = 'block';
+  updatePosition() {
+    if (!this.anchorElement) return;
+    const rect = this.anchorElement.getBoundingClientRect();
+    const x = window.scrollX + rect.left;
+    const y = window.scrollY + rect.bottom + 10;
     this.hostElement.style.left = `${x}px`;
     this.hostElement.style.top = `${y}px`;
+  }
+
+  open(hash, existingText = "", screenshotDataUrl = null, anchorElement = null) {
+    this.currentHash = hash;
+    this.currentScreenshot = screenshotDataUrl;
+    this.anchorElement = anchorElement;
+    
+    this.hostElement.style.display = 'block';
+    this.updatePosition();
+    
     const textarea = this.shadowRoot.getElementById('note-input');
     textarea.value = existingText;
+
+    const previewWrapper = this.shadowRoot.getElementById('preview-wrapper');
+    const previewImg = this.shadowRoot.getElementById('preview-img');
+    if (screenshotDataUrl) {
+      previewImg.src = screenshotDataUrl;
+      previewWrapper.style.display = 'block';
+    } else {
+      previewImg.src = '';
+      previewWrapper.style.display = 'none';
+    }
+
     setTimeout(() => textarea.focus(), 10);
+  }
+
+  handleImageUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+       const dataUrl = event.target.result;
+       this.currentScreenshot = dataUrl;
+       const previewImg = this.shadowRoot.getElementById('preview-img');
+       const previewWrapper = this.shadowRoot.getElementById('preview-wrapper');
+       previewImg.src = dataUrl;
+       previewWrapper.style.display = 'block';
+    };
+    reader.readAsDataURL(file);
+  }
+
+  removeScreenshot() {
+    this.currentScreenshot = null;
+    const previewWrapper = this.shadowRoot.getElementById('preview-wrapper');
+    const previewImg = this.shadowRoot.getElementById('preview-img');
+    if (previewWrapper) {
+      previewImg.src = '';
+      previewWrapper.style.display = 'none';
+    }
+    const fileInput = this.shadowRoot.getElementById('image-upload');
+    if (fileInput) fileInput.value = '';
   }
 
   close() {
     this.hostElement.style.display = 'none';
     this.currentHash = null;
+    this.currentScreenshot = null;
     this.shadowRoot.getElementById('note-input').value = '';
+    
+    const previewWrapper = this.shadowRoot.getElementById('preview-wrapper');
+    if (previewWrapper) {
+        this.shadowRoot.getElementById('preview-img').src = '';
+        previewWrapper.style.display = 'none';
+    }
+    const fileInput = this.shadowRoot.getElementById('image-upload');
+    if (fileInput) fileInput.value = '';
   }
 
-saveNote() {
+  saveNote() {
     const text = this.shadowRoot.getElementById('note-input').value.trim();
-    if (!text) return this.close();
-    chrome.runtime.sendMessage({ action: "SAVE_NOTE", payload: { hash: this.currentHash, content: text, url: window.location.href, timestamp: Date.now() } }, (response) => {
+    if (!text && !this.currentScreenshot) {
+      if (this.currentHash) this.deleteNote();
+      else this.close();
+      return;
+    }
+    
+    this.finalizeSave(text, this.currentScreenshot);
+  }
+
+  deleteNote() {
+    chrome.runtime.sendMessage({ action: "DELETE_NOTE", hash: this.currentHash }, (response) => {
+       if (response && response.success) {
+          this.close();
+          window.dispatchEvent(new CustomEvent('paranote-deleted', { detail: { hash: this.currentHash } }));
+       }
+    });
+  }
+
+  finalizeSave(text, screenshotDataUrl) {
+    const payload = { 
+        hash: this.currentHash, 
+        content: text, 
+        url: window.location.href, 
+        timestamp: Date.now() 
+    };
+    if (screenshotDataUrl) {
+        payload.screenshot = screenshotDataUrl;
+    } else {
+        payload.screenshot = null;
+    }
+
+    chrome.runtime.sendMessage({ action: "SAVE_NOTE", payload: payload }, (response) => {
       if (response && response.success) {
         this.close();
-        // Pass the actual content along with the hash!
-        window.dispatchEvent(new CustomEvent('paranote-saved', { detail: { hash: this.currentHash, content: text } }));
+        window.dispatchEvent(new CustomEvent('paranote-saved', { detail: { hash: this.currentHash, content: text, screenshot: screenshotDataUrl, anchorElement: this.anchorElement } }));
       }
     });
   }
@@ -77,18 +211,37 @@ saveNote() {
 // --- NEW: THE DISPLAY CARD (For VIEWING Notes) ---
 // This class creates an immutable note card anchored to a specific paragraph.
 class ParaNoteDisplay {
-  constructor(content, x, y) {
+  constructor(noteData, anchorElement) {
+    this.anchorElement = anchorElement;
     this.hostElement = document.createElement('div');
     this.hostElement.className = 'paranote-display-host'; // Used for cleanup
+    this.hostElement.dataset.hash = noteData.hash;
     this.hostElement.style.cssText = `
       position: absolute;
-      z-index: 2147483646; /* Slightly lower than editor */
+      z-index: 2147483645; 
       pointer-events: auto;
-      width: 200px; /* Constrained width for sideline notes */
-      left: ${x}px;
-      top: ${y}px;
+      width: 250px; 
+      transition: top 0.1s ease;
+      display: none; /* Initially hidden until IntersectionObserver fires */
     `;
     this.shadowRoot = this.hostElement.attachShadow({ mode: 'open' });
+
+    this.updatePosition = () => {
+      if (!this.anchorElement) return;
+      const rect = this.anchorElement.getBoundingClientRect();
+      const documentY = window.scrollY + rect.top;
+      this.hostElement.dataset.originalY = documentY;
+      const x = window.scrollX + rect.right + 15;
+      this.hostElement.style.left = `${x}px`;
+      if (!this.hostElement.style.top) this.hostElement.style.top = `${documentY}px`;
+    };
+    this.updatePosition();
+    this.hostElement.addEventListener('update-position', this.updatePosition);
+
+    const contentHtml = typeof noteData === 'string' ? noteData : noteData.content;
+    const screenshotHtml = (typeof noteData === 'object' && noteData.screenshot) 
+        ? `<img src="${noteData.screenshot}" class="note-screenshot" alt="Paragraph snapshot" />` 
+        : '';
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -98,10 +251,48 @@ class ParaNoteDisplay {
           border: 1px solid #dadce0;
           border-left: 4px solid #34a853; /* Match highlight color */
           border-radius: 6px;
-          padding: 10px;
           box-shadow: 0 2px 8px rgba(0,0,0,0.1);
           color: #202124;
           box-sizing: border-box;
+          display: flex;
+          flex-direction: column;
+          position: relative;
+        }
+        .btn-delete-card {
+          position: absolute;
+          top: 4px;
+          right: 4px;
+          width: 24px;
+          height: 24px;
+          border: none;
+          background: transparent;
+          color: #5f6368;
+          border-radius: 50%;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 14px;
+          opacity: 0;
+          transition: opacity 0.2s, background 0.2s;
+          z-index: 10;
+        }
+        .note-card:hover .btn-delete-card {
+          opacity: 1;
+        }
+        .btn-delete-card:hover {
+          background: rgba(0,0,0,0.1);
+          color: #d93025;
+        }
+        .content-wrapper {
+          padding: 10px;
+          overflow: hidden;
+          transition: max-height 0.3s ease;
+        }
+        .content-wrapper.collapsed {
+          max-height: 80px;
+          mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+          -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
         }
         .note-content {
           font-size: 14px;
@@ -109,17 +300,191 @@ class ParaNoteDisplay {
           margin-bottom: 4px;
           word-wrap: break-word;
         }
+        .note-screenshot {
+          max-width: 100%;
+          border-radius: 4px;
+          margin-top: 8px;
+          border: 1px solid #e8eaed;
+          box-sizing: border-box;
+          cursor: zoom-in;
+        }
+        .toggle-btn {
+          display: none;
+          width: 100%;
+          border: none;
+          border-top: 1px solid #dadce0;
+          background: #f8f9fa;
+          color: #5f6368;
+          padding: 6px;
+          cursor: pointer;
+          font-size: 12px;
+          font-weight: 500;
+          border-radius: 0 0 6px 6px;
+        }
+        .toggle-btn:hover { background: #f1f3f4; }
+        .note-card.is-collapsed .btn-expand { display: block; }
+        .note-card.is-expanded .btn-collapse { display: block; }
+        
+        .overlay {
+          display: none;
+          position: fixed;
+          top: 0; left: 0; width: 100vw; height: 100vh;
+          background: rgba(0, 0, 0, 0.8);
+          z-index: 2147483647;
+          align-items: center;
+          justify-content: center;
+          cursor: zoom-out;
+        }
+        .overlay.active {
+          display: flex;
+        }
+        .overlay img {
+          max-width: 90vw;
+          max-height: 90vh;
+          border-radius: 8px;
+          box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
         @media (prefers-color-scheme: dark) {
           .note-card { background: #2a2b2e; border-color: #5f6368; color: #e8eaed; box-shadow: 0 4px 10px rgba(0,0,0,0.3);}
           .note-content { color: #e8eaed;}
+          .note-screenshot { border-color: #5f6368; }
+          .toggle-btn { background: #303134; border-color: #5f6368; color: #8ab4f8; }
+          .toggle-btn:hover { background: #3c4043; }
+          .btn-delete-card { color: #9aa0a6; }
+          .btn-delete-card:hover { background: rgba(255,255,255,0.1); color: #f28b82; }
         }
       </style>
-      <div class="note-card">
-        <div class="note-content">${content}</div>
+      <div class="note-card" id="card">
+        <button class="btn-delete-card" id="btn-delete" title="Delete Note">✕</button>
+        <div class="content-wrapper" id="wrapper">
+          <div class="note-content">${contentHtml}</div>
+          ${screenshotHtml}
+        </div>
+        <button class="toggle-btn btn-expand" id="btn-expand">▼ Show more</button>
+        <button class="toggle-btn btn-collapse" id="btn-collapse">▲ Show less</button>
+      </div>
+      <div class="overlay" id="overlay">
+        ${typeof noteData === 'object' && noteData.screenshot ? `<img src="${noteData.screenshot}">` : ''}
       </div>
     `;
 
     document.body.appendChild(this.hostElement);
+
+    this.isManuallyExpanded = false;
+    this.isCollapsed = false;
+
+    const card = this.shadowRoot.getElementById('card');
+    const wrapper = this.shadowRoot.getElementById('wrapper');
+    const btnExpand = this.shadowRoot.getElementById('btn-expand');
+    const btnCollapse = this.shadowRoot.getElementById('btn-collapse');
+    const btnDelete = this.shadowRoot.getElementById('btn-delete');
+
+    if (btnDelete) {
+        btnDelete.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (confirm("Delete this note?")) {
+                chrome.runtime.sendMessage({ action: "DELETE_NOTE", hash: noteData.hash }, (response) => {
+                    if (response && response.success) {
+                        window.dispatchEvent(new CustomEvent('paranote-deleted', { detail: { hash: noteData.hash } }));
+                    }
+                });
+            }
+        });
+    }
+
+    this.collapse = () => {
+       if (this.isCollapsed) return;
+       this.isCollapsed = true;
+       wrapper.classList.add('collapsed');
+       card.classList.add('is-collapsed');
+       card.classList.remove('is-expanded');
+       this.hostElement.style.zIndex = "2147483645"; 
+    };
+
+    this.expand = () => {
+       if (!this.isCollapsed) return;
+       this.isCollapsed = false;
+       wrapper.classList.remove('collapsed');
+       card.classList.remove('is-collapsed');
+       card.classList.add('is-expanded');
+       this.hostElement.style.zIndex = "2147483646"; 
+    };
+
+    const resizeObserver = new ResizeObserver(() => {
+       if (this.isManuallyExpanded) return;
+       if (wrapper.scrollHeight > 100 && !this.isCollapsed) {
+           this.collapse();
+       }
+       window.dispatchEvent(new CustomEvent('paranote-layout-changed'));
+    });
+    resizeObserver.observe(card);
+
+    btnExpand.addEventListener('click', () => {
+       this.isManuallyExpanded = true;
+       this.expand();
+    });
+
+    btnCollapse.addEventListener('click', () => {
+       this.isManuallyExpanded = false; 
+       this.collapse();
+    });
+
+    const imgElement = this.shadowRoot.querySelector('.note-screenshot');
+    if (imgElement) {
+        imgElement.onload = () => window.dispatchEvent(new CustomEvent('paranote-layout-changed'));
+    }
+
+    if (typeof noteData === 'object' && noteData.screenshot) {
+      const overlayEl = this.shadowRoot.getElementById('overlay');
+
+      this.handleEsc = (e) => {
+        if (e.key === 'Escape') this.closeOverlay();
+      };
+
+      this.closeOverlay = () => {
+        overlayEl.classList.remove('active');
+        window.removeEventListener('keydown', this.handleEsc);
+      };
+
+      imgElement.addEventListener('click', () => {
+        overlayEl.classList.add('active');
+        window.addEventListener('keydown', this.handleEsc);
+      });
+
+      overlayEl.addEventListener('click', () => {
+        this.closeOverlay();
+      });
+    }
+
+    this.intersectionObserver = new IntersectionObserver((entries) => {
+        let changed = false;
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                if (this.hostElement.style.display === 'none') {
+                    this.hostElement.style.display = 'block';
+                    changed = true;
+                }
+            } else {
+                if (this.hostElement.style.display !== 'none') {
+                    this.hostElement.style.display = 'none';
+                    changed = true;
+                }
+            }
+        });
+        if (changed) {
+            window.dispatchEvent(new CustomEvent('paranote-layout-changed'));
+        }
+    }, { rootMargin: '150px' }); 
+    
+    if (this.anchorElement) {
+        this.intersectionObserver.observe(this.anchorElement);
+    }
+
+    this.hostElement.paranoteDestroy = () => {
+        if (this.intersectionObserver) this.intersectionObserver.disconnect();
+        if (resizeObserver) resizeObserver.disconnect();
+        this.hostElement.remove();
+    };
   }
 }
 
@@ -175,13 +540,20 @@ function handleMouseOver(event) {
   activeAddButton.addEventListener('click', (e) => {
     e.stopPropagation(); 
     const editorRect = paragraph.getBoundingClientRect();
-    
-    // 3. Pass the existing text (if any) into the editor when opening
     const textToLoad = existingNote ? existingNote.content : "";
-    editorComponent.open(textHash, window.scrollX + editorRect.left, window.scrollY + editorRect.bottom + 10, textToLoad);
     
-    activeAddButton.remove(); 
-    activeAddButton = null;
+    const btn = activeAddButton;
+    btn.style.display = 'none'; // hide button so it isn't in screenshot
+
+    let screenshotToUse = existingNote ? existingNote.screenshot : null;
+
+    const openEditor = () => {
+      editorComponent.open(textHash, textToLoad, screenshotToUse, paragraph);
+      if (btn && btn.parentNode) btn.remove(); 
+      if (activeAddButton === btn) activeAddButton = null;
+    };
+
+    openEditor();
   });
 }
 
@@ -239,6 +611,57 @@ function startApp() {
   document.body.addEventListener('mouseout', handleMouseOut);
 }
 
+function resolveLayout() {
+    const hosts = Array.from(document.querySelectorAll('.paranote-display-host'));
+    if (hosts.length === 0) return;
+    
+    hosts.sort((a, b) => {
+        const aY = parseFloat(a.dataset.originalY || a.style.top);
+        const bY = parseFloat(b.dataset.originalY || b.style.top);
+        return aY - bY;
+    });
+
+    let currentY = 0;
+
+    for (let i = 0; i < hosts.length; i++) {
+        const host = hosts[i];
+        if (host.style.display === 'none') continue;
+        
+        const intendedY = parseFloat(host.dataset.originalY || host.style.top);
+        if (!host.dataset.originalY) host.dataset.originalY = intendedY;
+
+        const actualY = Math.max(intendedY, currentY);
+        host.style.top = `${actualY}px`;
+        
+        const height = host.offsetHeight; 
+        currentY = actualY + height + 15; 
+    }
+}
+
+window.addEventListener('paranote-layout-changed', () => {
+    resolveLayout();
+});
+
+let isScrolling = false;
+window.addEventListener('scroll', () => {
+    if (!isViewModeActive && (!isAppActive || editorComponent.hostElement.style.display !== 'block')) return;
+    if (!isScrolling) {
+        window.requestAnimationFrame(() => {
+            if (isViewModeActive) {
+                document.querySelectorAll('.paranote-display-host').forEach(host => {
+                    host.dispatchEvent(new CustomEvent('update-position'));
+                });
+                resolveLayout();
+            }
+            if (isAppActive && editorComponent.hostElement.style.display === 'block') {
+                 editorComponent.updatePosition();
+            }
+            isScrolling = false;
+        });
+        isScrolling = true;
+    }
+}, { capture: true, passive: true });
+
 // COMMAND: View Notes on Page (Anchored to Paragraphs)
 function showNotesOnPage() {
     // If notes are already visible, this acts as a refresh/toggle
@@ -253,25 +676,19 @@ function showNotesOnPage() {
             applyHighlights(loadedNotesData); // Ensure highlights are active
 
             // Create a lookup map for faster processing
-            const notesMap = new Map(loadedNotesData.map(note => [note.hash, note.content]));
+            const notesMap = new Map(loadedNotesData.map(note => [note.hash, note]));
 
             // Scan the DOM for paragraphs matching the hashes
             document.querySelectorAll('p').forEach(p => {
                 const hash = generateTextHash(p.textContent.trim());
                 if (notesMap.has(hash)) {
                     // WE FOUND A MATCH!
-                    const content = notesMap.get(hash);
-                    
-                    // Position: Aligned to Right-Top of paragraph
-                    const rect = p.getBoundingClientRect();
-                    // window.scrollX/Y is critical because we anchor to document.body
-                    const x = window.scrollX + rect.right + 15; // 15px gutter to the right
-                    const y = window.scrollY + rect.top; // Align to paragraph top
-
-                    // Create the individual display card
-                    new ParaNoteDisplay(content, x, y);
+                    const noteData = notesMap.get(hash);
+                    new ParaNoteDisplay(noteData, p);
                 }
             });
+
+            setTimeout(() => resolveLayout(), 100);
         }
     });
 }
@@ -279,7 +696,10 @@ function showNotesOnPage() {
 // Utility: Internal cleanup of the note cards
 function hideVisibleNotes() {
     isViewModeActive = false;
-    document.querySelectorAll('.paranote-display-host').forEach(el => el.remove());
+    document.querySelectorAll('.paranote-display-host').forEach(el => {
+        if (el.paranoteDestroy) el.paranoteDestroy();
+        else el.remove();
+    });
 }
 
 // COMMAND: Stop App (Cleanup Everything)
@@ -303,18 +723,27 @@ function stopApp() {
   });
 }
 
-// Listen for newly saved notes to update highlights instantly
+// Listen for DELETIONS to remove highlights and UI
+window.addEventListener('paranote-deleted', (e) => {
+  const hash = e.detail.hash;
+  
+  // Remove from in-memory array
+  loadedNotesData = loadedNotesData.filter(n => n.hash !== hash);
+  
+  // Remove highlight
+  document.querySelectorAll('p').forEach(p => {
+    if (generateTextHash(p.textContent.trim()) === hash) {
+       p.classList.remove('paranote-highlighted');
+    }
+  });
+
+  if (isViewModeActive) {
+      showNotesOnPage();
+  }
+});
+
 // Listen for newly saved notes to update highlights instantly
 window.addEventListener('paranote-saved', (e) => {
-  // Check if we are updating an existing note, or adding a brand new one
-  const existingIndex = loadedNotesData.findIndex(n => n.hash === e.detail.hash);
-  if (existingIndex !== -1) {
-    loadedNotesData[existingIndex].content = e.detail.content; // Update existing
-  } else {
-    loadedNotesData.push({ hash: e.detail.hash, content: e.detail.content }); // Add new
-  }
-  
-  if (currentHoveredParagraph) {
-    currentHoveredParagraph.classList.add('paranote-highlighted');
-  }
+  // Use the bulletproof database sync pipeline to elegantly rebuild the UI seamlessly
+  showNotesOnPage();
 });
