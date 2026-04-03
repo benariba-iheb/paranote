@@ -261,7 +261,8 @@ class ParaNoteEditor {
       content: text,
       url: window.location.href,
       timestamp: Date.now(),
-      type: typeDesc || "Content Typo"
+      type: typeDesc || "Content Typo",
+      taskContext: extractCurrentTaskAndSubtask()
     };
     if (screenshotDataUrl) {
       payload.screenshot = screenshotDataUrl;
@@ -316,6 +317,10 @@ class ParaNoteDisplay {
       ? `<img src="${noteData.screenshot}" class="note-screenshot" alt="Paragraph snapshot" />`
       : '';
 
+    const contextHtml = (typeof noteData === 'object' && noteData.taskContext && noteData.taskContext.activeTask)
+      ? `<div class="task-context" title="${noteData.taskContext.activeTask}${noteData.taskContext.activeSubtask ? ' / ' + noteData.taskContext.activeSubtask : ''}">${noteData.taskContext.activeSubtask ? noteData.taskContext.activeSubtask : noteData.taskContext.activeTask}</div>`
+      : '';
+
     this.shadowRoot.innerHTML = `
       <style>
         .note-card {
@@ -342,6 +347,21 @@ class ParaNoteDisplay {
           margin: 10px 10px 0 10px;
           text-transform: uppercase;
           letter-spacing: 0.5px;
+        }
+        .task-context {
+          align-self: flex-start;
+          background: #f1f3f4;
+          color: #5f6368;
+          padding: 2px 8px;
+          border-radius: 4px;
+          font-size: 10px;
+          margin: 4px 10px 0 10px;
+          font-style: italic;
+          display: inline-block;
+          max-width: 90%;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
         .btn-delete-card {
           position: absolute;
@@ -442,6 +462,7 @@ class ParaNoteDisplay {
       <div class="note-card" id="card">
         <button class="btn-delete-card" id="btn-delete" title="Delete Note">✕</button>
         <div class="type-badge">${noteType}</div>
+        ${contextHtml}
         <div class="content-wrapper" id="wrapper">
           <div class="note-content">${contentHtml}</div>
           ${screenshotHtml}
@@ -861,3 +882,28 @@ window.addEventListener('paranote-saved', (e) => {
   // Use the bulletproof database sync pipeline to elegantly rebuild the UI seamlessly
   showNotesOnPage();
 });
+
+// ==========================================
+// 4. LabLabee Context Extraction
+// ==========================================
+function extractCurrentTaskAndSubtask() {
+  let activeTask = "Unknown Task";
+  let activeSubtask = null;
+
+  const sidebar = document.getElementById('sidebarStyledPaper');
+  if (!sidebar) return null; // Not on LabLabee or missing sidebar
+
+  const menuItems = sidebar.querySelectorAll('.MuiMenuItem-root');
+  for (const item of menuItems) {
+    if (item.style.borderLeft && item.style.borderLeft.includes('rgb(31, 28, 86)')) {
+      const textEl = item.querySelector('.MuiTypography-root');
+      if (textEl) activeTask = textEl.textContent.trim();
+    }
+    if (item.style.backgroundColor && item.style.backgroundColor.includes('rgb(238, 238, 238)')) {
+      const textEl = item.querySelector('.MuiTypography-root');
+      if (textEl) activeSubtask = textEl.textContent.trim();
+    }
+  }
+
+  return { activeTask, activeSubtask };
+}

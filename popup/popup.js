@@ -50,3 +50,34 @@ document.getElementById('btn-quit').addEventListener('click', () => sendToPage("
 // Bind Cloud Events
 document.getElementById('btn-backup').addEventListener('click', () => sendToCloud("BACKUP_TO_CLOUD", "Backing up to Drive..."));
 document.getElementById('btn-restore').addEventListener('click', () => sendToCloud("RESTORE_FROM_CLOUD", "Downloading from Drive..."));
+
+// Perform Domain Check on Startup
+chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+  if (tabs[0] && tabs[0].url) {
+    if (tabs[0].url.startsWith('chrome://') || tabs[0].url.startsWith('chrome-extension://')) {
+      disableApp("Not available on Chrome pages.");
+      return;
+    }
+    const url = new URL(tabs[0].url);
+    if (!url.hostname.endsWith('lablabee.com') && url.hostname !== 'lablabee.com') {
+      disableApp("Active only on LabLabee domains.");
+    }
+  }
+});
+
+function disableApp(message) {
+  statusMsg.innerText = message;
+  statusMsg.style.color = "#ea4335";
+  const buttonsToDisable = [
+    'btn-add-issue', 'btn-add-note', 
+    'btn-view-issues', 'btn-view-notes', 'btn-quit'
+  ];
+  buttonsToDisable.forEach(id => {
+    const b = document.getElementById(id);
+    if (b) {
+      b.disabled = true;
+      b.style.opacity = '0.5';
+      b.style.cursor = 'not-allowed';
+    }
+  });
+}

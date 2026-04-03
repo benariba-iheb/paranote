@@ -36,7 +36,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         domain: domain,
         timestamp: request.payload.timestamp,
         screenshot: request.payload.screenshot,
-        type: request.payload.type || "Content Typo"
+        type: request.payload.type || "Content Typo",
+        taskContext: request.payload.taskContext || null
       };
 
       const existingIndex = db.findIndex(n => n.hash === newNote.hash && n.domain === newNote.domain);
