@@ -889,6 +889,21 @@ window.addEventListener('paranote-saved', (e) => {
 function extractCurrentTaskAndSubtask() {
   let activeTask = "Unknown Task";
   let activeSubtask = null;
+  let labName = document.title ? document.title.replace(/[^a-zA-Z0-9 -_]/g, '').trim() : "General";
+
+  const headers = document.querySelectorAll('span, h1, h2, h3, h4, h5, div');
+  for (const h of headers) {
+    if (h.textContent && h.textContent.includes('| Learning Challenges')) {
+      const parts = h.textContent.split('|');
+      if (parts.length > 0) {
+        let rawName = parts[0].replace('<', '');
+        // Erase concatenated navigation menu text
+        rawName = rawName.replace('DashboardCatalogLabsLearning PathsSandboxesSkill TestsLabLabee AIHelp CenterSettings', '');
+        labName = rawName.trim().replace(/[^a-zA-Z0-9 -_]/g, '');
+        break;
+      }
+    }
+  }
 
   const sidebar = document.getElementById('sidebarStyledPaper');
   if (!sidebar) return null; // Not on LabLabee or missing sidebar
@@ -905,5 +920,5 @@ function extractCurrentTaskAndSubtask() {
     }
   }
 
-  return { activeTask, activeSubtask };
+  return { activeTask, activeSubtask, labName };
 }

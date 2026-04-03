@@ -138,11 +138,151 @@ class DriveSyncEngine {
     return data.id;
   }
 
-  // 4. Upload local data to Google Drive
+  // 4. CSV Conversion
+  static convertIssuesToCSV(issuesArray) {
+    if (!issuesArray || issuesArray.length === 0) return "Content,Issue Type,Subchallenge,Screenshot,Hash\n";
+    const headers = ["Content", "Issue Type", "Subchallenge", "Screenshot", "Hash"];
+    const lines = [headers.join(',')];
+    issuesArray.forEach(issue => {
+      const type = `"${(issue.type || "").replace(/"/g, '""')}"`;
+      const content = `"${(issue.content || "").replace(/"/g, '""')}"`;
+      const ctxText = issue.taskContext ? `${issue.taskContext.activeTask || ''} / ${issue.taskContext.activeSubtask || ''}` : "Unknown";
+      const context = `"${ctxText.replace(/"/g, '""')}"`;
+      const screenshot = issue.screenshot ? `"${issue.screenshot}"` : `""`;
+      const hash = `"${issue.hash || ""}"`;
+      lines.push([content, type, context, screenshot, hash].join(','));
+    });
+    return lines.join('\n');
+  }
+
+  // 5. Get or Create Visible Folder
+  static async getOrCreateFolder(token, folderName, parentId = null) {
+    const parentQuery = parentId ? ` and '${parentId}' in parents` : "";
+    const query = encodeURIComponent(`mimeType='application/vnd.google-apps.folder' and name='${folderName}' and trashed=false${parentQuery}`);
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const data = await res.json();
+    if (data.files && data.files.length > 0) return data.files[0].id;
+
+    const requestBody = { name: folderName, mimeType: 'application/vnd.google-apps.folder' };
+    if (parentId) requestBody.parents = [parentId];
+
+    const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    });
+    const createData = await createRes.json();
+    return createData.id;
+  }
+
+  // 6. Get or Create Visible CSV File
+  static async getOrCreateCsvFile(token, folderId, fileName) {
+    const query = encodeURIComponent(`name='${fileName}' and '${folderId}' in parents and trashed=false`);
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const data = await res.json();
+    if (data.files && data.files.length > 0) return data.files[0].id;
+
+    const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: fileName, parents: [folderId] })
+    });
+    const createData = await createRes.json();
+    return createData.id;
+  }
+
+  // 7. Extract Image to Drive
+  static async uploadImageToDrive(token, baseDataUri, fileName, folderId) {
+    const query = encodeURIComponent(`name='${fileName}' and '${folderId}' in parents and trashed=false`);
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const data = await res.json();
+    if (data.files && data.files.length > 0) return data.files[0].id;
+
+    let blob;
+    try {
+      const response = await fetch(baseDataUri);
+      blob = await response.blob();
+    } catch (e) {
+      return null;
+    }
+
+    const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: fileName, parents: [folderId], mimeType: 'image/jpeg' })
+    });
+    const createData = await createRes.json();
+    const fileId = createData.id;
+
+    await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'image/jpeg' },
+      body: blob
+    });
+    return fileId;
+  }
+
+  // 8. Upload local data to Google Drive
   static async backupToDrive() {
     try {
       console.log("ParaNote: Starting Drive Backup...");
       const token = await this.getToken();
+      const localData = await chrome.storage.local.get(['notesDatabase', 'issuesDatabase']);
+
+      // -- NEW: Export Issues to Visible CSV --
+      console.log("ParaNote: Exporting Issues to /lab_issues/ folder...");
+      const rootFolderId = await this.getOrCreateFolder(token, 'lab_issues');
+
+      let issuesArray = localData.issuesDatabase || [];
+      const groupedIssues = {};
+      for (let issue of issuesArray) {
+        let lName = (issue.taskContext && issue.taskContext.labName) ? issue.taskContext.labName : "General";
+        // Append Quality Tester suffix
+        lName = `${lName}_QT`;
+        if (!groupedIssues[lName]) groupedIssues[lName] = [];
+        groupedIssues[lName].push(issue);
+      }
+
+      for (const [labName, group] of Object.entries(groupedIssues)) {
+        console.log(`ParaNote: Exporting group ${labName}...`);
+        const labFolderId = await this.getOrCreateFolder(token, labName, rootFolderId);
+        const csvFileId = await this.getOrCreateCsvFile(token, labFolderId, 'issues_export.csv');
+        const screenshotsFolderId = await this.getOrCreateFolder(token, 'screenshots', labFolderId);
+
+        let exportArray = JSON.parse(JSON.stringify(group)); // Deep clone
+
+        for (let issue of exportArray) {
+          if (issue.screenshot && issue.screenshot.startsWith('data:image')) {
+            const fileName = `${issue.hash}.jpg`;
+            const imgFileId = await this.uploadImageToDrive(token, issue.screenshot, fileName, screenshotsFolderId);
+            if (imgFileId) {
+              issue.screenshot = `https://drive.google.com/file/d/${imgFileId}/view`;
+            } else {
+              issue.screenshot = "";
+            }
+          }
+        }
+
+        const csvString = this.convertIssuesToCSV(exportArray);
+        
+        const csvRes = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${csvFileId}?uploadType=media`, {
+          method: 'PATCH',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'text/csv'
+          },
+          body: csvString
+        });
+        if (!csvRes.ok) throw new Error(`CSV Upload Failed for ${labName}`);
+      }
+
+      // -- ORIGINAL: Keep Hidden Sync JSON Backup for State Restore --
       let fileId = await this.getFileId(token);
 
       if (!fileId) {
@@ -150,14 +290,12 @@ class DriveSyncEngine {
         fileId = await this.createFile(token);
       }
 
-      // Get local data
-      const localData = await chrome.storage.local.get(['notesDatabase', 'issuesDatabase']);
       const db = {
         notes: localData.notesDatabase || [],
         issues: localData.issuesDatabase || []
       };
 
-      // Upload content to the file
+      // Upload content to the JSON file
       await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
         method: 'PATCH',
         headers: {

@@ -8,7 +8,7 @@
     "storage",
     "activeTab",
     "scripting",
-    "identity" 
+    "identity"
   ],
   "host_permissions": [
     "*://lablabee.com/*",
@@ -23,15 +23,23 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://lablabee.com/*", "*://*.lablabee.com/*"],
-      "js": ["content/content.js"],
-      "css": ["content/styles.css"]
+      "matches": [
+        "*://lablabee.com/*",
+        "*://*.lablabee.com/*"
+      ],
+      "js": [
+        "content/content.js"
+      ],
+      "css": [
+        "content/styles.css"
+      ]
     }
   ],
   "oauth2": {
-    "client_id": "400263042707-thop12p3p7g2rrlggpvv8ll2tnboe50h.apps.googleusercontent.com",
+    "client_id": "400263042707-mlumjd3lahadrjujlpq2fqqdpu1odfb3.apps.googleusercontent.com",
     "scopes": [
-      "https://www.googleapis.com/auth/drive.appdata"
+      "https://www.googleapis.com/auth/drive.appdata",
+      "https://www.googleapis.com/auth/drive.file"
     ]
   }
 }
