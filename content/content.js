@@ -4,8 +4,26 @@
 // 1. UI COMPONENTS (Shadow DOM)
 // ==========================================
 
+const NOTE_TYPES = {
+  "Content Typo": "#ea4335",
+  "Image Typo": "#e91e63",
+  "User guide": "#9c27b0",
+  "Catalog Lab information": "#673ab7",
+  "Lab logo": "#3f51b5",
+  "Quizzes": "#1a73e8",
+  "Challenge validation": "#03a9f4",
+  "Sudoers Problem": "#00bcd4",
+  "Copy Command": "#009688",
+  "Translation Error": "#34a853",
+  "Service Down": "#ff9800",
+  "Content Wrong": "#ff5722",
+  "Instance creation": "#795548",
+  "Terminal Problem": "#607d8b",
+  "RDP Problem": "#202124"
+};
+
 // --- THE EDITOR (For ADDING Notes) ---
-// This class manages the input popup. (Unchanged from previous functional version)
+// This class manages the input popup.
 class ParaNoteEditor {
   constructor() {
     this.hostElement = document.createElement('div');
@@ -24,6 +42,10 @@ class ParaNoteEditor {
         .btn-remove-img { position: absolute; top: -8px; right: -8px; background: #ea4335; color: white; border: none; border-radius: 50%; width: 22px; height: 22px; font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
         .btn-remove-img:hover { background: #c5221f; }
         .actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+        .type-selector-wrapper { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+        select { flex-grow: 1; padding: 6px; border-radius: 4px; border: 1px solid #ccc; font-size: 13px; background: white; color: #202124; cursor: pointer; outline: none; }
+        select:focus { border-color: #1a73e8; }
+        .color-dot { width: 12px; height: 12px; min-width: 12px; border-radius: 50%; display: inline-block; background-color: #ea4335; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
         .right-actions { display: flex; gap: 8px; }
         .file-upload-label { font-size: 13px; color: #1a73e8; cursor: pointer; display: flex; align-items: center; gap: 4px; font-weight: 500;}
         .file-upload-label:hover { text-decoration: underline; }
@@ -43,6 +65,12 @@ class ParaNoteEditor {
         }
       </style>
       <div class="editor-container">
+        <div class="type-selector-wrapper">
+          <span id="type-color-dot" class="color-dot"></span>
+          <select id="note-type-select">
+            ${Object.keys(NOTE_TYPES).map(t => `<option value="${t}">${t}</option>`).join('')}
+          </select>
+        </div>
         <textarea id="note-input" placeholder="Type a note or paste an image from clipboard..."></textarea>
         <div id="preview-wrapper" class="preview-container" style="margin-top: 4px;">
           <img id="preview-img" class="preview-img" alt="Screenshot preview" />
@@ -88,6 +116,13 @@ class ParaNoteEditor {
     this.shadowRoot.getElementById('btn-save').addEventListener('click', () => this.saveNote());
     this.shadowRoot.getElementById('btn-remove-img').addEventListener('click', () => this.removeScreenshot());
     this.shadowRoot.getElementById('image-upload').addEventListener('change', (e) => this.handleImageUpload(e));
+    
+    const typeSelect = this.shadowRoot.getElementById('note-type-select');
+    const colorDot = this.shadowRoot.getElementById('type-color-dot');
+    typeSelect.addEventListener('change', (e) => {
+        colorDot.style.backgroundColor = NOTE_TYPES[e.target.value] || "#ea4335";
+    });
+
     document.body.appendChild(this.hostElement);
   }
 
@@ -100,7 +135,7 @@ class ParaNoteEditor {
     this.hostElement.style.top = `${y}px`;
   }
 
-  open(hash, existingText = "", screenshotDataUrl = null, anchorElement = null) {
+  open(hash, existingText = "", screenshotDataUrl = null, type = null, anchorElement = null) {
     this.currentHash = hash;
     this.currentScreenshot = screenshotDataUrl;
     this.anchorElement = anchorElement;
@@ -110,6 +145,16 @@ class ParaNoteEditor {
     
     const textarea = this.shadowRoot.getElementById('note-input');
     textarea.value = existingText;
+
+    const typeSelect = this.shadowRoot.getElementById('note-type-select');
+    const colorDot = this.shadowRoot.getElementById('type-color-dot');
+    
+    if (type && NOTE_TYPES[type]) {
+      typeSelect.value = type;
+    } else {
+      typeSelect.selectedIndex = 0; // Default to first
+    }
+    colorDot.style.backgroundColor = NOTE_TYPES[typeSelect.value] || "#ea4335";
 
     const previewWrapper = this.shadowRoot.getElementById('preview-wrapper');
     const previewImg = this.shadowRoot.getElementById('preview-img');
@@ -174,7 +219,8 @@ class ParaNoteEditor {
       return;
     }
     
-    this.finalizeSave(text, this.currentScreenshot);
+    const selectedType = this.shadowRoot.getElementById('note-type-select').value;
+    this.finalizeSave(text, this.currentScreenshot, selectedType);
   }
 
   deleteNote() {
@@ -186,12 +232,13 @@ class ParaNoteEditor {
     });
   }
 
-  finalizeSave(text, screenshotDataUrl) {
+  finalizeSave(text, screenshotDataUrl, typeDesc) {
     const payload = { 
         hash: this.currentHash, 
         content: text, 
         url: window.location.href, 
-        timestamp: Date.now() 
+        timestamp: Date.now(),
+        type: typeDesc || "Content Typo"
     };
     if (screenshotDataUrl) {
         payload.screenshot = screenshotDataUrl;
@@ -202,7 +249,7 @@ class ParaNoteEditor {
     chrome.runtime.sendMessage({ action: "SAVE_NOTE", payload: payload }, (response) => {
       if (response && response.success) {
         this.close();
-        window.dispatchEvent(new CustomEvent('paranote-saved', { detail: { hash: this.currentHash, content: text, screenshot: screenshotDataUrl, anchorElement: this.anchorElement } }));
+        window.dispatchEvent(new CustomEvent('paranote-saved', { detail: { hash: this.currentHash, content: text, screenshot: screenshotDataUrl, type: typeDesc, anchorElement: this.anchorElement } }));
       }
     });
   }
@@ -239,6 +286,9 @@ class ParaNoteDisplay {
     this.hostElement.addEventListener('update-position', this.updatePosition);
 
     const contentHtml = typeof noteData === 'string' ? noteData : noteData.content;
+    const noteType = typeof noteData === 'object' && noteData.type ? noteData.type : "Content Typo";
+    const typeColor = NOTE_TYPES[noteType] || "#34a853";
+    
     const screenshotHtml = (typeof noteData === 'object' && noteData.screenshot) 
         ? `<img src="${noteData.screenshot}" class="note-screenshot" alt="Paragraph snapshot" />` 
         : '';
@@ -249,7 +299,7 @@ class ParaNoteDisplay {
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
           background: #ffffff;
           border: 1px solid #dadce0;
-          border-left: 4px solid #34a853; /* Match highlight color */
+          border-left: 4px solid ${typeColor};
           border-radius: 6px;
           box-shadow: 0 2px 8px rgba(0,0,0,0.1);
           color: #202124;
@@ -257,6 +307,18 @@ class ParaNoteDisplay {
           display: flex;
           flex-direction: column;
           position: relative;
+        }
+        .type-badge {
+          align-self: flex-start;
+          background-color: ${typeColor}15; /* 15 hex = ~8% opacity */
+          color: ${typeColor};
+          padding: 2px 8px;
+          border-radius: 12px;
+          font-size: 11px;
+          font-weight: 600;
+          margin: 10px 10px 0 10px;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
         }
         .btn-delete-card {
           position: absolute;
@@ -356,6 +418,7 @@ class ParaNoteDisplay {
       </style>
       <div class="note-card" id="card">
         <button class="btn-delete-card" id="btn-delete" title="Delete Note">✕</button>
+        <div class="type-badge">${noteType}</div>
         <div class="content-wrapper" id="wrapper">
           <div class="note-content">${contentHtml}</div>
           ${screenshotHtml}
@@ -528,7 +591,7 @@ function handleMouseOver(event) {
   
   // 2. Create the button, changing the text if a note already exists
   activeAddButton = document.createElement('button');
-  activeAddButton.innerText = existingNote ? '✏️ Edit Note' : '📝 Add Note';
+  activeAddButton.innerText = existingNote ? '✏️ Edit Issue' : '🐞 Log Issue';
   activeAddButton.className = 'paranote-trigger-btn';
   
   const rect = paragraph.getBoundingClientRect();
@@ -546,9 +609,10 @@ function handleMouseOver(event) {
     btn.style.display = 'none'; // hide button so it isn't in screenshot
 
     let screenshotToUse = existingNote ? existingNote.screenshot : null;
+    let typeToUse = existingNote ? existingNote.type : null;
 
     const openEditor = () => {
-      editorComponent.open(textHash, textToLoad, screenshotToUse, paragraph);
+      editorComponent.open(textHash, textToLoad, screenshotToUse, typeToUse, paragraph);
       if (btn && btn.parentNode) btn.remove(); 
       if (activeAddButton === btn) activeAddButton = null;
     };
@@ -570,10 +634,13 @@ function handleMouseOut(event) {
 // --- Highlight Function (Adds .paranote-highlighted class) ---
 function applyHighlights(notesList) {
     if (!notesList || notesList.length === 0) return;
-    const notesHashes = new Set(notesList.map(note => note.hash));
+    const notesMap = new Map(notesList.map(note => [note.hash, note]));
     document.querySelectorAll('p').forEach(p => {
-        if (notesHashes.has(generateTextHash(p.textContent.trim()))) {
+        const hash = generateTextHash(p.textContent.trim());
+        if (notesMap.has(hash)) {
+          const noteData = notesMap.get(hash);
           p.classList.add('paranote-highlighted');
+          p.style.setProperty('border-left-color', NOTE_TYPES[noteData.type] || '#34a853', 'important');
         }
     });
 }
@@ -720,6 +787,7 @@ function stopApp() {
   // 3. Remove Highlights
   document.querySelectorAll('.paranote-highlighted').forEach(p => {
     p.classList.remove('paranote-highlighted');
+    p.style.removeProperty('border-left-color');
   });
 }
 
@@ -734,6 +802,7 @@ window.addEventListener('paranote-deleted', (e) => {
   document.querySelectorAll('p').forEach(p => {
     if (generateTextHash(p.textContent.trim()) === hash) {
        p.classList.remove('paranote-highlighted');
+       p.style.removeProperty('border-left-color');
     }
   });
 

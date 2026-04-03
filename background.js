@@ -32,7 +32,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
          url: request.payload.url,
          domain: domain,
          timestamp: request.payload.timestamp,
-         screenshot: request.payload.screenshot
+         screenshot: request.payload.screenshot,
+         type: request.payload.type || "Content Typo"
        };
        
        const existingIndex = db.findIndex(n => n.hash === newNote.hash && n.domain === newNote.domain);
