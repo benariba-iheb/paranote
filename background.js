@@ -155,6 +155,22 @@ class DriveSyncEngine {
     return lines.join('\n');
   }
 
+  // 5. Notes CSV Conversion
+  static convertNotesToCSV(notesArray) {
+    if (!notesArray || notesArray.length === 0) return "Content,Context,Screenshot,Hash\n";
+    const headers = ["Content", "Context", "Screenshot", "Hash"];
+    const lines = [headers.join(',')];
+    notesArray.forEach(note => {
+      const content = `"${(note.content || "").replace(/"/g, '""')}"`;
+      const ctxText = note.taskContext ? `${note.taskContext.activeTask || ''} / ${note.taskContext.activeSubtask || ''}` : "Unknown";
+      const context = `"${ctxText.replace(/"/g, '""')}"`;
+      const screenshot = note.screenshot ? `"${note.screenshot}"` : `""`;
+      const hash = `"${note.hash || ""}"`;
+      lines.push([content, context, screenshot, hash].join(','));
+    });
+    return lines.join('\n');
+  }
+
   // 5. Get or Create Visible Folder
   static async getOrCreateFolder(token, folderName, parentId = null) {
     const parentQuery = parentId ? ` and '${parentId}' in parents` : "";
@@ -228,48 +244,41 @@ class DriveSyncEngine {
     return fileId;
   }
 
-  // 8. Upload local data to Google Drive
-  static async backupToDrive() {
-    try {
-      console.log("ParaNote: Starting Drive Backup...");
-      const token = await this.getToken();
-      const localData = await chrome.storage.local.get(['notesDatabase', 'issuesDatabase']);
+  // 8. Universal Export Pipeline
+  static async exportDataCategory(token, dataArray, rootFolderName, fileNamePrefix, conversionFunction) {
+      console.log(`ParaNote: Exporting to /${rootFolderName}/ folder...`);
+      const rootFolderId = await this.getOrCreateFolder(token, rootFolderName);
 
-      // -- NEW: Export Issues to Visible CSV --
-      console.log("ParaNote: Exporting Issues to /lab_issues/ folder...");
-      const rootFolderId = await this.getOrCreateFolder(token, 'lab_issues');
-
-      let issuesArray = localData.issuesDatabase || [];
-      const groupedIssues = {};
-      for (let issue of issuesArray) {
-        let lName = (issue.taskContext && issue.taskContext.labName) ? issue.taskContext.labName : "General";
-        // Append Quality Tester suffix
-        lName = `${lName}_QT`;
-        if (!groupedIssues[lName]) groupedIssues[lName] = [];
-        groupedIssues[lName].push(issue);
+      const groupedData = {};
+      for (let item of dataArray) {
+        let lName = (item.taskContext && item.taskContext.labName) ? item.taskContext.labName : "General";
+        // Append Quality Tester suffix ONLY for issues
+        if (rootFolderName === 'lab_issues') lName = `${lName}_QT`; 
+        if (!groupedData[lName]) groupedData[lName] = [];
+        groupedData[lName].push(item);
       }
 
-      for (const [labName, group] of Object.entries(groupedIssues)) {
+      for (const [labName, group] of Object.entries(groupedData)) {
         console.log(`ParaNote: Exporting group ${labName}...`);
         const labFolderId = await this.getOrCreateFolder(token, labName, rootFolderId);
-        const csvFileId = await this.getOrCreateCsvFile(token, labFolderId, 'issues_export.csv');
+        const csvFileId = await this.getOrCreateCsvFile(token, labFolderId, `${fileNamePrefix}_export.csv`);
         const screenshotsFolderId = await this.getOrCreateFolder(token, 'screenshots', labFolderId);
 
         let exportArray = JSON.parse(JSON.stringify(group)); // Deep clone
 
-        for (let issue of exportArray) {
-          if (issue.screenshot && issue.screenshot.startsWith('data:image')) {
-            const fileName = `${issue.hash}.jpg`;
-            const imgFileId = await this.uploadImageToDrive(token, issue.screenshot, fileName, screenshotsFolderId);
+        for (let item of exportArray) {
+          if (item.screenshot && item.screenshot.startsWith('data:image')) {
+            const fileName = `${item.hash}.jpg`;
+            const imgFileId = await this.uploadImageToDrive(token, item.screenshot, fileName, screenshotsFolderId);
             if (imgFileId) {
-              issue.screenshot = `https://drive.google.com/file/d/${imgFileId}/view`;
+              item.screenshot = `https://drive.google.com/file/d/${imgFileId}/view`;
             } else {
-              issue.screenshot = "";
+              item.screenshot = "";
             }
           }
         }
 
-        const csvString = this.convertIssuesToCSV(exportArray);
+        const csvString = conversionFunction(exportArray);
         
         const csvRes = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${csvFileId}?uploadType=media`, {
           method: 'PATCH',
@@ -280,6 +289,22 @@ class DriveSyncEngine {
           body: csvString
         });
         if (!csvRes.ok) throw new Error(`CSV Upload Failed for ${labName}`);
+      }
+  }
+
+  // 9. Upload local data to Google Drive
+  static async backupToDrive() {
+    try {
+      console.log("ParaNote: Starting Drive Backup...");
+      const token = await this.getToken();
+      const localData = await chrome.storage.local.get(['notesDatabase', 'issuesDatabase']);
+
+      // Execute dual export pipelines
+      if (localData.issuesDatabase && localData.issuesDatabase.length > 0) {
+        await this.exportDataCategory(token, localData.issuesDatabase, 'lab_issues', 'issues', this.convertIssuesToCSV);
+      }
+      if (localData.notesDatabase && localData.notesDatabase.length > 0) {
+        await this.exportDataCategory(token, localData.notesDatabase, 'notes', 'notes', this.convertNotesToCSV);
       }
 
       // -- ORIGINAL: Keep Hidden Sync JSON Backup for State Restore --
