@@ -5,20 +5,21 @@
 // ==========================================
 
 const NOTE_TYPES = {
-  "Content Typo": "#ea4335",
-  "Image Typo": "#e91e63",
-  "User guide": "#9c27b0",
-  "Catalog Lab information": "#673ab7",
-  "Lab logo": "#3f51b5",
-  "Quizzes": "#1a73e8",
-  "Challenge validation": "#03a9f4",
-  "Sudoers Problem": "#00bcd4",
-  "Copy Command": "#009688",
-  "Translation Error": "#34a853",
+  "Note": "#34a853",
+  "Content Typo": "#ff1500ff",
+  "Image Typo": "#e7034fff",
+  "User guide": "#cf2c0381",
+  "Catalog Lab information": "#0c86e9a1",
+  "Lab logo": "#0004ffff",
+  "Quizzes": "#e88f1a6e",
+  "Challenge validation": "#f4030334",
+  "Sudoers Problem": "#d4006350",
+  "Copy Command": "#fc3657ff",
+  "Translation Error": "#664b00ff",
   "Service Down": "#ff9800",
   "Content Wrong": "#ff5722",
   "Instance creation": "#795548",
-  "Terminal Problem": "#607d8b",
+  "Terminal Problem": "#990033ff",
   "RDP Problem": "#202124"
 };
 
@@ -97,7 +98,7 @@ class ParaNoteEditor {
         if (items[i].type.indexOf('image') !== -1) {
           const file = items[i].getAsFile();
           if (!file) continue;
-          
+
           const reader = new FileReader();
           reader.onload = (event) => {
             const dataUrl = event.target.result;
@@ -116,11 +117,11 @@ class ParaNoteEditor {
     this.shadowRoot.getElementById('btn-save').addEventListener('click', () => this.saveNote());
     this.shadowRoot.getElementById('btn-remove-img').addEventListener('click', () => this.removeScreenshot());
     this.shadowRoot.getElementById('image-upload').addEventListener('change', (e) => this.handleImageUpload(e));
-    
+
     const typeSelect = this.shadowRoot.getElementById('note-type-select');
     const colorDot = this.shadowRoot.getElementById('type-color-dot');
     typeSelect.addEventListener('change', (e) => {
-        colorDot.style.backgroundColor = NOTE_TYPES[e.target.value] || "#ea4335";
+      colorDot.style.backgroundColor = NOTE_TYPES[e.target.value] || "#ea4335";
     });
 
     document.body.appendChild(this.hostElement);
@@ -135,25 +136,47 @@ class ParaNoteEditor {
     this.hostElement.style.top = `${y}px`;
   }
 
-  open(hash, existingText = "", screenshotDataUrl = null, type = null, anchorElement = null) {
+  open(hash, existingText = "", screenshotDataUrl = null, type = null, anchorElement = null, mode = "issue") {
     this.currentHash = hash;
     this.currentScreenshot = screenshotDataUrl;
     this.anchorElement = anchorElement;
-    
+
     this.hostElement.style.display = 'block';
     this.updatePosition();
-    
+
     const textarea = this.shadowRoot.getElementById('note-input');
     textarea.value = existingText;
 
     const typeSelect = this.shadowRoot.getElementById('note-type-select');
     const colorDot = this.shadowRoot.getElementById('type-color-dot');
-    
-    if (type && NOTE_TYPES[type]) {
-      typeSelect.value = type;
+
+    // Dynamically build dropdown options
+    typeSelect.innerHTML = '';
+    const availableTypes = Object.keys(NOTE_TYPES).filter(t =>
+      mode === 'note' ? t === "Note" : t !== "Note"
+    );
+
+    availableTypes.forEach(t => {
+      const option = document.createElement('option');
+      option.value = t;
+      option.textContent = t;
+      typeSelect.appendChild(option);
+    });
+
+    const wrapper = this.shadowRoot.querySelector('.type-selector-wrapper');
+    if (mode === 'note') {
+      wrapper.style.display = 'none';
     } else {
-      typeSelect.selectedIndex = 0; // Default to first
+      wrapper.style.display = 'flex';
+      typeSelect.disabled = availableTypes.length <= 1;
     }
+
+    if (type && availableTypes.includes(type)) {
+      typeSelect.value = type;
+    } else if (availableTypes.length > 0) {
+      typeSelect.selectedIndex = 0; // Default to first available
+    }
+
     colorDot.style.backgroundColor = NOTE_TYPES[typeSelect.value] || "#ea4335";
 
     const previewWrapper = this.shadowRoot.getElementById('preview-wrapper');
@@ -174,12 +197,12 @@ class ParaNoteEditor {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (event) => {
-       const dataUrl = event.target.result;
-       this.currentScreenshot = dataUrl;
-       const previewImg = this.shadowRoot.getElementById('preview-img');
-       const previewWrapper = this.shadowRoot.getElementById('preview-wrapper');
-       previewImg.src = dataUrl;
-       previewWrapper.style.display = 'block';
+      const dataUrl = event.target.result;
+      this.currentScreenshot = dataUrl;
+      const previewImg = this.shadowRoot.getElementById('preview-img');
+      const previewWrapper = this.shadowRoot.getElementById('preview-wrapper');
+      previewImg.src = dataUrl;
+      previewWrapper.style.display = 'block';
     };
     reader.readAsDataURL(file);
   }
@@ -201,11 +224,11 @@ class ParaNoteEditor {
     this.currentHash = null;
     this.currentScreenshot = null;
     this.shadowRoot.getElementById('note-input').value = '';
-    
+
     const previewWrapper = this.shadowRoot.getElementById('preview-wrapper');
     if (previewWrapper) {
-        this.shadowRoot.getElementById('preview-img').src = '';
-        previewWrapper.style.display = 'none';
+      this.shadowRoot.getElementById('preview-img').src = '';
+      previewWrapper.style.display = 'none';
     }
     const fileInput = this.shadowRoot.getElementById('image-upload');
     if (fileInput) fileInput.value = '';
@@ -218,32 +241,32 @@ class ParaNoteEditor {
       else this.close();
       return;
     }
-    
+
     const selectedType = this.shadowRoot.getElementById('note-type-select').value;
     this.finalizeSave(text, this.currentScreenshot, selectedType);
   }
 
   deleteNote() {
     chrome.runtime.sendMessage({ action: "DELETE_NOTE", hash: this.currentHash }, (response) => {
-       if (response && response.success) {
-          this.close();
-          window.dispatchEvent(new CustomEvent('paranote-deleted', { detail: { hash: this.currentHash } }));
-       }
+      if (response && response.success) {
+        this.close();
+        window.dispatchEvent(new CustomEvent('paranote-deleted', { detail: { hash: this.currentHash } }));
+      }
     });
   }
 
   finalizeSave(text, screenshotDataUrl, typeDesc) {
-    const payload = { 
-        hash: this.currentHash, 
-        content: text, 
-        url: window.location.href, 
-        timestamp: Date.now(),
-        type: typeDesc || "Content Typo"
+    const payload = {
+      hash: this.currentHash,
+      content: text,
+      url: window.location.href,
+      timestamp: Date.now(),
+      type: typeDesc || "Content Typo"
     };
     if (screenshotDataUrl) {
-        payload.screenshot = screenshotDataUrl;
+      payload.screenshot = screenshotDataUrl;
     } else {
-        payload.screenshot = null;
+      payload.screenshot = null;
     }
 
     chrome.runtime.sendMessage({ action: "SAVE_NOTE", payload: payload }, (response) => {
@@ -288,10 +311,10 @@ class ParaNoteDisplay {
     const contentHtml = typeof noteData === 'string' ? noteData : noteData.content;
     const noteType = typeof noteData === 'object' && noteData.type ? noteData.type : "Content Typo";
     const typeColor = NOTE_TYPES[noteType] || "#34a853";
-    
-    const screenshotHtml = (typeof noteData === 'object' && noteData.screenshot) 
-        ? `<img src="${noteData.screenshot}" class="note-screenshot" alt="Paragraph snapshot" />` 
-        : '';
+
+    const screenshotHtml = (typeof noteData === 'object' && noteData.screenshot)
+      ? `<img src="${noteData.screenshot}" class="note-screenshot" alt="Paragraph snapshot" />`
+      : '';
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -443,58 +466,58 @@ class ParaNoteDisplay {
     const btnDelete = this.shadowRoot.getElementById('btn-delete');
 
     if (btnDelete) {
-        btnDelete.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (confirm("Delete this note?")) {
-                chrome.runtime.sendMessage({ action: "DELETE_NOTE", hash: noteData.hash }, (response) => {
-                    if (response && response.success) {
-                        window.dispatchEvent(new CustomEvent('paranote-deleted', { detail: { hash: noteData.hash } }));
-                    }
-                });
+      btnDelete.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (confirm("Delete this note?")) {
+          chrome.runtime.sendMessage({ action: "DELETE_NOTE", hash: noteData.hash }, (response) => {
+            if (response && response.success) {
+              window.dispatchEvent(new CustomEvent('paranote-deleted', { detail: { hash: noteData.hash } }));
             }
-        });
+          });
+        }
+      });
     }
 
     this.collapse = () => {
-       if (this.isCollapsed) return;
-       this.isCollapsed = true;
-       wrapper.classList.add('collapsed');
-       card.classList.add('is-collapsed');
-       card.classList.remove('is-expanded');
-       this.hostElement.style.zIndex = "2147483645"; 
+      if (this.isCollapsed) return;
+      this.isCollapsed = true;
+      wrapper.classList.add('collapsed');
+      card.classList.add('is-collapsed');
+      card.classList.remove('is-expanded');
+      this.hostElement.style.zIndex = "2147483645";
     };
 
     this.expand = () => {
-       if (!this.isCollapsed) return;
-       this.isCollapsed = false;
-       wrapper.classList.remove('collapsed');
-       card.classList.remove('is-collapsed');
-       card.classList.add('is-expanded');
-       this.hostElement.style.zIndex = "2147483646"; 
+      if (!this.isCollapsed) return;
+      this.isCollapsed = false;
+      wrapper.classList.remove('collapsed');
+      card.classList.remove('is-collapsed');
+      card.classList.add('is-expanded');
+      this.hostElement.style.zIndex = "2147483646";
     };
 
     const resizeObserver = new ResizeObserver(() => {
-       if (this.isManuallyExpanded) return;
-       if (wrapper.scrollHeight > 100 && !this.isCollapsed) {
-           this.collapse();
-       }
-       window.dispatchEvent(new CustomEvent('paranote-layout-changed'));
+      if (this.isManuallyExpanded) return;
+      if (wrapper.scrollHeight > 100 && !this.isCollapsed) {
+        this.collapse();
+      }
+      window.dispatchEvent(new CustomEvent('paranote-layout-changed'));
     });
     resizeObserver.observe(card);
 
     btnExpand.addEventListener('click', () => {
-       this.isManuallyExpanded = true;
-       this.expand();
+      this.isManuallyExpanded = true;
+      this.expand();
     });
 
     btnCollapse.addEventListener('click', () => {
-       this.isManuallyExpanded = false; 
-       this.collapse();
+      this.isManuallyExpanded = false;
+      this.collapse();
     });
 
     const imgElement = this.shadowRoot.querySelector('.note-screenshot');
     if (imgElement) {
-        imgElement.onload = () => window.dispatchEvent(new CustomEvent('paranote-layout-changed'));
+      imgElement.onload = () => window.dispatchEvent(new CustomEvent('paranote-layout-changed'));
     }
 
     if (typeof noteData === 'object' && noteData.screenshot) {
@@ -520,33 +543,33 @@ class ParaNoteDisplay {
     }
 
     this.intersectionObserver = new IntersectionObserver((entries) => {
-        let changed = false;
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                if (this.hostElement.style.display === 'none') {
-                    this.hostElement.style.display = 'block';
-                    changed = true;
-                }
-            } else {
-                if (this.hostElement.style.display !== 'none') {
-                    this.hostElement.style.display = 'none';
-                    changed = true;
-                }
-            }
-        });
-        if (changed) {
-            window.dispatchEvent(new CustomEvent('paranote-layout-changed'));
+      let changed = false;
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          if (this.hostElement.style.display === 'none') {
+            this.hostElement.style.display = 'block';
+            changed = true;
+          }
+        } else {
+          if (this.hostElement.style.display !== 'none') {
+            this.hostElement.style.display = 'none';
+            changed = true;
+          }
         }
-    }, { rootMargin: '150px' }); 
-    
+      });
+      if (changed) {
+        window.dispatchEvent(new CustomEvent('paranote-layout-changed'));
+      }
+    }, { rootMargin: '150px' });
+
     if (this.anchorElement) {
-        this.intersectionObserver.observe(this.anchorElement);
+      this.intersectionObserver.observe(this.anchorElement);
     }
 
     this.hostElement.paranoteDestroy = () => {
-        if (this.intersectionObserver) this.intersectionObserver.disconnect();
-        if (resizeObserver) resizeObserver.disconnect();
-        this.hostElement.remove();
+      if (this.intersectionObserver) this.intersectionObserver.disconnect();
+      if (resizeObserver) resizeObserver.disconnect();
+      this.hostElement.remove();
     };
   }
 }
@@ -560,6 +583,8 @@ const editorComponent = new ParaNoteEditor();
 // ==========================================
 let isAppActive = false;
 let isViewModeActive = false; // Tracks if notes are currently visible on page
+let appAddingMode = null; // 'issue' or 'note'
+let appViewingMode = null; // 'issue' or 'note'
 let activeAddButton = null;
 let currentHoveredParagraph = null;
 let hideButtonTimeout = null;
@@ -576,73 +601,77 @@ function generateTextHash(str) {
 function handleMouseOver(event) {
   if (event.target === activeAddButton || (currentHoveredParagraph && currentHoveredParagraph.contains(event.target))) {
     clearTimeout(hideButtonTimeout);
-    if (event.target === activeAddButton) return; 
+    if (event.target === activeAddButton) return;
   }
-  
+
   const paragraph = event.target.closest('p');
   if (!paragraph || paragraph === currentHoveredParagraph) return;
   if (activeAddButton) activeAddButton.remove();
-  
+
   currentHoveredParagraph = paragraph;
-  
+
   // 1. Calculate the hash immediately to check for existing notes
   const textHash = generateTextHash(paragraph.textContent.trim());
   const existingNote = loadedNotesData.find(note => note.hash === textHash);
-  
+
   // 2. Create the button, changing the text if a note already exists
   activeAddButton = document.createElement('button');
-  activeAddButton.innerText = existingNote ? '✏️ Edit Issue' : '🐞 Log Issue';
   activeAddButton.className = 'paranote-trigger-btn';
-  
+
+  if (existingNote) {
+    activeAddButton.innerText = appAddingMode === 'note' ? '✏️ Edit Note' : '✏️ Edit Issue';
+  } else {
+    activeAddButton.innerText = appAddingMode === 'note' ? '📝 Take Note' : '🐞 Log Issue';
+  }
+
   const rect = paragraph.getBoundingClientRect();
   activeAddButton.style.top = `${window.scrollY + rect.top - 25}px`;
   activeAddButton.style.left = `${window.scrollX + rect.right - 80}px`;
-  
+
   document.body.appendChild(activeAddButton);
 
   activeAddButton.addEventListener('click', (e) => {
-    e.stopPropagation(); 
-    const editorRect = paragraph.getBoundingClientRect();
+    e.stopPropagation();
     const textToLoad = existingNote ? existingNote.content : "";
-    
     const btn = activeAddButton;
     btn.style.display = 'none'; // hide button so it isn't in screenshot
 
     let screenshotToUse = existingNote ? existingNote.screenshot : null;
-    let typeToUse = existingNote ? existingNote.type : null;
+    let typeToUse = existingNote ? existingNote.type : (appAddingMode === 'note' ? "Note" : "Content Typo");
 
-    const openEditor = () => {
-      editorComponent.open(textHash, textToLoad, screenshotToUse, typeToUse, paragraph);
-      if (btn && btn.parentNode) btn.remove(); 
-      if (activeAddButton === btn) activeAddButton = null;
-    };
-
-    openEditor();
+    editorComponent.open(textHash, textToLoad, screenshotToUse, typeToUse, paragraph, appAddingMode);
+    if (btn && btn.parentNode) btn.remove();
+    if (activeAddButton === btn) activeAddButton = null;
   });
 }
 
 function handleMouseOut(event) {
   // Grace period to cross the gap
   if (currentHoveredParagraph && !currentHoveredParagraph.contains(event.relatedTarget) && event.relatedTarget !== activeAddButton) {
-     hideButtonTimeout = setTimeout(() => {
-       if (activeAddButton) { activeAddButton.remove(); activeAddButton = null; }
-       currentHoveredParagraph = null;
-     }, 300);
+    hideButtonTimeout = setTimeout(() => {
+      if (activeAddButton) { activeAddButton.remove(); activeAddButton = null; }
+      currentHoveredParagraph = null;
+    }, 300);
   }
 }
 
 // --- Highlight Function (Adds .paranote-highlighted class) ---
 function applyHighlights(notesList) {
-    if (!notesList || notesList.length === 0) return;
-    const notesMap = new Map(notesList.map(note => [note.hash, note]));
-    document.querySelectorAll('p').forEach(p => {
-        const hash = generateTextHash(p.textContent.trim());
-        if (notesMap.has(hash)) {
-          const noteData = notesMap.get(hash);
-          p.classList.add('paranote-highlighted');
-          p.style.setProperty('border-left-color', NOTE_TYPES[noteData.type] || '#34a853', 'important');
-        }
-    });
+  if (!notesList || notesList.length === 0) return;
+  const notesMap = new Map(notesList.map(note => [note.hash, note]));
+  document.querySelectorAll('p').forEach(p => {
+    const hash = generateTextHash(p.textContent.trim());
+    if (notesMap.has(hash)) {
+      const noteData = notesMap.get(hash);
+      p.classList.add('paranote-highlighted');
+      p.style.setProperty('border-left-color', NOTE_TYPES[noteData.type] || '#34a853', 'important');
+      if (noteData.type === "Note") {
+        p.style.setProperty('background-color', 'rgba(52, 168, 83, 0.15)', 'important');
+      } else {
+        p.style.removeProperty('background-color');
+      }
+    }
+  });
 }
 
 // ==========================================
@@ -650,25 +679,38 @@ function applyHighlights(notesList) {
 // ==========================================
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === "START_ADDING") {
-    startApp();
-  } else if (request.action === "SHOW_SUMMARY") {
-    showNotesOnPage();
+  if (request.action === "START_ADDING_ISSUE") {
+    startApp('issue');
+    sendResponse({ success: true });
+  } else if (request.action === "START_ADDING_NOTE") {
+    startApp('note');
+    sendResponse({ success: true });
+  } else if (request.action === "SHOW_SUMMARY_ISSUE") {
+    showNotesOnPage('issue');
+    sendResponse({ success: true });
+  } else if (request.action === "SHOW_SUMMARY_NOTE") {
+    showNotesOnPage('note');
+    sendResponse({ success: true });
   } else if (request.action === "STOP_APP") {
     stopApp();
+    sendResponse({ success: true });
   }
 });
 
 // COMMAND: Start Adding Notes
-function startApp() {
-  if (isAppActive) return; 
+function startApp(mode) {
+  if (isAppActive) {
+    if (appAddingMode === mode) return; // already active in this mode
+    stopApp(); // stop fully before restarting in new mode
+  }
   isAppActive = true;
-  console.log("ParaNote: Annotation Mode ON");
+  appAddingMode = mode;
+  console.log("ParaNote: Annotation Mode ON - " + mode);
 
   // 1. Fetch existing notes for context and apply highlights
   chrome.runtime.sendMessage({ action: "FETCH_NOTES_FOR_URL" }, (response) => {
     if (response && response.success && response.notes.length > 0) {
-      loadedNotesData = response.notes;
+      loadedNotesData = response.notes.filter(n => mode === 'note' ? n.type === "Note" : n.type !== "Note");
       applyHighlights(loadedNotesData);
     }
   });
@@ -679,94 +721,95 @@ function startApp() {
 }
 
 function resolveLayout() {
-    const hosts = Array.from(document.querySelectorAll('.paranote-display-host'));
-    if (hosts.length === 0) return;
-    
-    hosts.sort((a, b) => {
-        const aY = parseFloat(a.dataset.originalY || a.style.top);
-        const bY = parseFloat(b.dataset.originalY || b.style.top);
-        return aY - bY;
-    });
+  const hosts = Array.from(document.querySelectorAll('.paranote-display-host'));
+  if (hosts.length === 0) return;
 
-    let currentY = 0;
+  hosts.sort((a, b) => {
+    const aY = parseFloat(a.dataset.originalY || a.style.top);
+    const bY = parseFloat(b.dataset.originalY || b.style.top);
+    return aY - bY;
+  });
 
-    for (let i = 0; i < hosts.length; i++) {
-        const host = hosts[i];
-        if (host.style.display === 'none') continue;
-        
-        const intendedY = parseFloat(host.dataset.originalY || host.style.top);
-        if (!host.dataset.originalY) host.dataset.originalY = intendedY;
+  let currentY = 0;
 
-        const actualY = Math.max(intendedY, currentY);
-        host.style.top = `${actualY}px`;
-        
-        const height = host.offsetHeight; 
-        currentY = actualY + height + 15; 
-    }
+  for (let i = 0; i < hosts.length; i++) {
+    const host = hosts[i];
+    if (host.style.display === 'none') continue;
+
+    const intendedY = parseFloat(host.dataset.originalY || host.style.top);
+    if (!host.dataset.originalY) host.dataset.originalY = intendedY;
+
+    const actualY = Math.max(intendedY, currentY);
+    host.style.top = `${actualY}px`;
+
+    const height = host.offsetHeight;
+    currentY = actualY + height + 15;
+  }
 }
 
 window.addEventListener('paranote-layout-changed', () => {
-    resolveLayout();
+  resolveLayout();
 });
 
 let isScrolling = false;
 window.addEventListener('scroll', () => {
-    if (!isViewModeActive && (!isAppActive || editorComponent.hostElement.style.display !== 'block')) return;
-    if (!isScrolling) {
-        window.requestAnimationFrame(() => {
-            if (isViewModeActive) {
-                document.querySelectorAll('.paranote-display-host').forEach(host => {
-                    host.dispatchEvent(new CustomEvent('update-position'));
-                });
-                resolveLayout();
-            }
-            if (isAppActive && editorComponent.hostElement.style.display === 'block') {
-                 editorComponent.updatePosition();
-            }
-            isScrolling = false;
+  if (!isViewModeActive && (!isAppActive || editorComponent.hostElement.style.display !== 'block')) return;
+  if (!isScrolling) {
+    window.requestAnimationFrame(() => {
+      if (isViewModeActive) {
+        document.querySelectorAll('.paranote-display-host').forEach(host => {
+          host.dispatchEvent(new CustomEvent('update-position'));
         });
-        isScrolling = true;
-    }
+        resolveLayout();
+      }
+      if (isAppActive && editorComponent.hostElement.style.display === 'block') {
+        editorComponent.updatePosition();
+      }
+      isScrolling = false;
+    });
+    isScrolling = true;
+  }
 }, { capture: true, passive: true });
 
 // COMMAND: View Notes on Page (Anchored to Paragraphs)
-function showNotesOnPage() {
-    // If notes are already visible, this acts as a refresh/toggle
-    hideVisibleNotes(); 
-    isViewModeActive = true;
-    console.log("ParaNote: Displaying all notes on page...");
+function showNotesOnPage(mode) {
+  // If notes are already visible, this acts as a refresh/toggle
+  hideVisibleNotes();
+  isViewModeActive = true;
+  appViewingMode = mode;
+  console.log("ParaNote: Displaying all " + mode + "s on page...");
 
-    // Fetch fresh data (in case notes were updated)
-    chrome.runtime.sendMessage({ action: "FETCH_NOTES_FOR_URL" }, (response) => {
-        if (response && response.success && response.notes.length > 0) {
-            loadedNotesData = response.notes;
-            applyHighlights(loadedNotesData); // Ensure highlights are active
+  // Fetch fresh data (in case notes were updated)
+  chrome.runtime.sendMessage({ action: "FETCH_NOTES_FOR_URL" }, (response) => {
+    if (response && response.success && response.notes.length > 0) {
+      loadedNotesData = response.notes.filter(n => mode === 'note' ? n.type === "Note" : n.type !== "Note");
+      applyHighlights(loadedNotesData); // Ensure highlights are active
 
-            // Create a lookup map for faster processing
-            const notesMap = new Map(loadedNotesData.map(note => [note.hash, note]));
+      // Create a lookup map for faster processing
+      const notesMap = new Map(loadedNotesData.map(note => [note.hash, note]));
 
-            // Scan the DOM for paragraphs matching the hashes
-            document.querySelectorAll('p').forEach(p => {
-                const hash = generateTextHash(p.textContent.trim());
-                if (notesMap.has(hash)) {
-                    // WE FOUND A MATCH!
-                    const noteData = notesMap.get(hash);
-                    new ParaNoteDisplay(noteData, p);
-                }
-            });
-
-            setTimeout(() => resolveLayout(), 100);
+      // Scan the DOM for paragraphs matching the hashes
+      document.querySelectorAll('p').forEach(p => {
+        const hash = generateTextHash(p.textContent.trim());
+        if (notesMap.has(hash)) {
+          // WE FOUND A MATCH!
+          const noteData = notesMap.get(hash);
+          new ParaNoteDisplay(noteData, p);
         }
-    });
+      });
+
+      setTimeout(() => resolveLayout(), 100);
+    }
+  });
 }
 
 // Utility: Internal cleanup of the note cards
 function hideVisibleNotes() {
-    isViewModeActive = false;
-    document.querySelectorAll('.paranote-display-host').forEach(el => {
-        if (el.paranoteDestroy) el.paranoteDestroy();
-        else el.remove();
-    });
+  isViewModeActive = false;
+  document.querySelectorAll('.paranote-display-host').forEach(el => {
+    if (el.paranoteDestroy) el.paranoteDestroy();
+    else el.remove();
+  });
 }
 
 // COMMAND: Stop App (Cleanup Everything)
@@ -788,26 +831,28 @@ function stopApp() {
   document.querySelectorAll('.paranote-highlighted').forEach(p => {
     p.classList.remove('paranote-highlighted');
     p.style.removeProperty('border-left-color');
+    p.style.removeProperty('background-color');
   });
 }
 
 // Listen for DELETIONS to remove highlights and UI
 window.addEventListener('paranote-deleted', (e) => {
   const hash = e.detail.hash;
-  
+
   // Remove from in-memory array
   loadedNotesData = loadedNotesData.filter(n => n.hash !== hash);
-  
+
   // Remove highlight
   document.querySelectorAll('p').forEach(p => {
     if (generateTextHash(p.textContent.trim()) === hash) {
-       p.classList.remove('paranote-highlighted');
-       p.style.removeProperty('border-left-color');
+      p.classList.remove('paranote-highlighted');
+      p.style.removeProperty('border-left-color');
+      p.style.removeProperty('background-color');
     }
   });
 
   if (isViewModeActive) {
-      showNotesOnPage();
+    showNotesOnPage();
   }
 });
 

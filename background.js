@@ -2,7 +2,7 @@
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log("ParaNote Extension Installed.");
-  chrome.storage.local.set({ notesDatabase: [] });
+  chrome.storage.local.set({ notesDatabase: [], issuesDatabase: [] });
 });
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -11,72 +11,79 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const tabUrl = sender.tab ? sender.tab.url : null;
     if (tabUrl) {
       const currentUrl = new URL(tabUrl).hostname;
-      chrome.storage.local.get(['notesDatabase'], (result) => {
-         const db = result.notesDatabase || [];
-         const siteNotes = db.filter(note => note.domain === currentUrl);
-         sendResponse({ success: true, notes: siteNotes });
+      chrome.storage.local.get(['notesDatabase', 'issuesDatabase'], (result) => {
+        const notesDb = result.notesDatabase || [];
+        const issuesDb = result.issuesDatabase || [];
+        const combinedDb = [...notesDb, ...issuesDb];
+        const siteNotes = combinedDb.filter(note => note.domain === currentUrl);
+        sendResponse({ success: true, notes: siteNotes });
       });
     }
-    return true; 
+    return true;
   }
-  
+
   // 2. ACTUAL SAVE LOGIC
   if (request.action === "SAVE_NOTE") {
-     chrome.storage.local.get(['notesDatabase'], (result) => {
-       const db = result.notesDatabase || [];
-       const domain = sender.tab && sender.tab.url ? new URL(sender.tab.url).hostname : "unknown";
-       
-       const newNote = { 
-         hash: request.payload.hash,
-         content: request.payload.content,
-         url: request.payload.url,
-         domain: domain,
-         timestamp: request.payload.timestamp,
-         screenshot: request.payload.screenshot,
-         type: request.payload.type || "Content Typo"
-       };
-       
-       const existingIndex = db.findIndex(n => n.hash === newNote.hash && n.domain === newNote.domain);
-       if (existingIndex !== -1) {
-         db[existingIndex] = newNote;
-       } else {
-         db.push(newNote);
-       }
-       
-       chrome.storage.local.set({ notesDatabase: db }, () => {
-         sendResponse({ success: true });
-       });
-     });
-     
-     return true; 
+    chrome.storage.local.get(['notesDatabase', 'issuesDatabase'], (result) => {
+      const isNote = request.payload.type === "Note";
+      const db = isNote ? (result.notesDatabase || []) : (result.issuesDatabase || []);
+      const domain = sender.tab && sender.tab.url ? new URL(sender.tab.url).hostname : "unknown";
+
+      const newNote = {
+        hash: request.payload.hash,
+        content: request.payload.content,
+        url: request.payload.url,
+        domain: domain,
+        timestamp: request.payload.timestamp,
+        screenshot: request.payload.screenshot,
+        type: request.payload.type || "Content Typo"
+      };
+
+      const existingIndex = db.findIndex(n => n.hash === newNote.hash && n.domain === newNote.domain);
+      if (existingIndex !== -1) {
+        db[existingIndex] = newNote;
+      } else {
+        db.push(newNote);
+      }
+
+      if (isNote) {
+        chrome.storage.local.set({ notesDatabase: db }, () => sendResponse({ success: true }));
+      } else {
+        chrome.storage.local.set({ issuesDatabase: db }, () => sendResponse({ success: true }));
+      }
+    });
+
+    return true;
   }
 
   if (request.action === "DELETE_NOTE") {
-     chrome.storage.local.get(['notesDatabase'], (result) => {
-       let db = result.notesDatabase || [];
-       const domain = sender.tab && sender.tab.url ? new URL(sender.tab.url).hostname : "unknown";
-       
-       db = db.filter(n => !(n.hash === request.hash && n.domain === domain));
-       
-       chrome.storage.local.set({ notesDatabase: db }, () => {
-         sendResponse({ success: true });
-       });
-     });
-     
-     return true; 
+    chrome.storage.local.get(['notesDatabase', 'issuesDatabase'], (result) => {
+      let notesDb = result.notesDatabase || [];
+      let issuesDb = result.issuesDatabase || [];
+      const domain = sender.tab && sender.tab.url ? new URL(sender.tab.url).hostname : "unknown";
+
+      notesDb = notesDb.filter(n => !(n.hash === request.hash && n.domain === domain));
+      issuesDb = issuesDb.filter(n => !(n.hash === request.hash && n.domain === domain));
+
+      chrome.storage.local.set({ notesDatabase: notesDb, issuesDatabase: issuesDb }, () => {
+        sendResponse({ success: true });
+      });
+    });
+
+    return true;
   }
 
   // 3. GOOGLE DRIVE BACKUP
   // Trigger a manual backup to the cloud
   if (request.action === "BACKUP_TO_CLOUD") {
     DriveSyncEngine.backupToDrive().then(success => sendResponse({ success }));
-    return true; 
+    return true;
   }
 
   // Trigger a manual restore from the cloud
   if (request.action === "RESTORE_FROM_CLOUD") {
     DriveSyncEngine.restoreFromDrive().then(success => sendResponse({ success }));
-    return true; 
+    return true;
   }
 });
 
@@ -91,7 +98,7 @@ class DriveSyncEngine {
   // 1. Get OAuth Token
   static async getToken() {
     return new Promise((resolve, reject) => {
-      chrome.identity.getAuthToken({ interactive: true }, function(token) {
+      chrome.identity.getAuthToken({ interactive: true }, function (token) {
         if (chrome.runtime.lastError || !token) {
           reject(chrome.runtime.lastError);
         } else {
@@ -136,15 +143,18 @@ class DriveSyncEngine {
       console.log("ParaNote: Starting Drive Backup...");
       const token = await this.getToken();
       let fileId = await this.getFileId(token);
-      
+
       if (!fileId) {
         console.log("ParaNote: Creating new sync file in Drive...");
         fileId = await this.createFile(token);
       }
 
       // Get local data
-      const localData = await chrome.storage.local.get(['notesDatabase']);
-      const db = localData.notesDatabase || [];
+      const localData = await chrome.storage.local.get(['notesDatabase', 'issuesDatabase']);
+      const db = {
+        notes: localData.notesDatabase || [],
+        issues: localData.issuesDatabase || []
+      };
 
       // Upload content to the file
       await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
@@ -155,7 +165,7 @@ class DriveSyncEngine {
         },
         body: JSON.stringify(db)
       });
-      
+
       console.log("ParaNote: Backup Successful! ✅");
       return true;
     } catch (error) {
@@ -180,11 +190,21 @@ class DriveSyncEngine {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      
+
       const remoteData = await response.json();
-      
-      // Overwrite local storage with remote data
-      await chrome.storage.local.set({ notesDatabase: remoteData });
+
+      // Legacy migration check: if the remote data is an Array, assume they are all issues
+      if (Array.isArray(remoteData)) {
+        console.log("ParaNote: Migrating legacy backup format into issuesDatabase...");
+        await chrome.storage.local.set({ issuesDatabase: remoteData, notesDatabase: [] });
+      } else {
+        // New format
+        await chrome.storage.local.set({
+          notesDatabase: remoteData.notes || [],
+          issuesDatabase: remoteData.issues || []
+        });
+      }
+
       console.log("ParaNote: Restore Successful! ✅");
       return true;
     } catch (error) {

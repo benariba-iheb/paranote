@@ -41,8 +41,10 @@ function sendToCloud(actionName, loadingText) {
 }
 
 // Bind Page Events
-document.getElementById('btn-add').addEventListener('click', () => sendToPage("START_ADDING"));
-document.getElementById('btn-view').addEventListener('click', () => sendToPage("SHOW_SUMMARY"));
+document.getElementById('btn-add-issue').addEventListener('click', () => sendToPage("START_ADDING_ISSUE"));
+document.getElementById('btn-add-note').addEventListener('click', () => sendToPage("START_ADDING_NOTE"));
+document.getElementById('btn-view-issues').addEventListener('click', () => sendToPage("SHOW_SUMMARY_ISSUE"));
+document.getElementById('btn-view-notes').addEventListener('click', () => sendToPage("SHOW_SUMMARY_NOTE"));
 document.getElementById('btn-quit').addEventListener('click', () => sendToPage("STOP_APP"));
 
 // Bind Cloud Events
