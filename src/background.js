@@ -1,4 +1,8 @@
 // background.js - Manifest V3 Service Worker
+import allowedUsers from './auth/allowed-users.json';
+
+const APP_TARGET = import.meta.env.VITE_APP_TARGET || 'support';
+const ALLOWED_EMAILS = (allowedUsers[APP_TARGET] || []).map(e => e.toLowerCase());
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log("ParaNote Extension Installed.");
@@ -29,7 +33,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const db = isNote ? (result.notesDatabase || []) : (result.issuesDatabase || []);
       const domain = sender.tab && sender.tab.url ? new URL(sender.tab.url).hostname : "unknown";
 
-      const newNote = {
+      const incomingNote = {
         hash: request.payload.hash,
         content: request.payload.content,
         url: request.payload.url,
@@ -37,14 +41,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         timestamp: request.payload.timestamp,
         screenshot: request.payload.screenshot,
         type: request.payload.type || "Content Typo",
+        labComment: request.payload.labComment || null,
+        labFixType: request.payload.labFixType || "Pending",
         taskContext: request.payload.taskContext || null
       };
 
-      const existingIndex = db.findIndex(n => n.hash === newNote.hash && n.domain === newNote.domain);
+      const existingIndex = db.findIndex(n => n.hash === incomingNote.hash && n.domain === incomingNote.domain);
       if (existingIndex !== -1) {
-        db[existingIndex] = newNote;
+        const existing = db[existingIndex];
+        // Merge: keep existing fields that the incoming payload did not supply,
+        // so Lab resolutions don't wipe out Support's screenshot / taskContext and vice-versa.
+        db[existingIndex] = {
+          ...existing,
+          // Always update mutable fields
+          content:    incomingNote.content    || existing.content,
+          type:       incomingNote.type       || existing.type,
+          timestamp:  incomingNote.timestamp,
+          // Preserve screenshot and taskContext from whichever side originally set them
+          screenshot: incomingNote.screenshot ?? existing.screenshot,
+          taskContext: incomingNote.taskContext ?? existing.taskContext,
+          // Lab resolution fields: only overwrite when the incoming value is non-null
+          labComment: incomingNote.labComment  !== null ? incomingNote.labComment  : existing.labComment,
+          labFixType: incomingNote.labFixType  !== null ? incomingNote.labFixType  : existing.labFixType,
+        };
       } else {
-        db.push(newNote);
+        db.push(incomingNote);
       }
 
       if (isNote) {
@@ -86,6 +107,40 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     DriveSyncEngine.restoreFromDrive().then(success => sendResponse({ success }));
     return true;
   }
+
+  // CHECK_AUTH — verify the signed-in Google account is on the allowlist
+  if (request.action === "CHECK_AUTH") {
+    chrome.identity.getAuthToken({ interactive: true }, async (token) => {
+      if (chrome.runtime.lastError || !token) {
+        sendResponse({ success: false, allowed: false, error: 'no_token' });
+        return;
+      }
+      try {
+        const profile = await DriveSyncEngine.getUserProfile(token);
+        const allowed = ALLOWED_EMAILS.includes(profile.email.toLowerCase());
+        const authUser = { email: profile.email, name: profile.name, picture: profile.picture, allowed };
+        chrome.storage.local.set({ authUser });
+        sendResponse({ success: true, allowed, email: profile.email, name: profile.name, picture: profile.picture });
+      } catch (e) {
+        sendResponse({ success: false, allowed: false, error: 'profile_fetch_failed' });
+      }
+    });
+    return true;
+  }
+
+  // SIGN_OUT — revoke token and clear cached user
+  if (request.action === "SIGN_OUT") {
+    chrome.identity.getAuthToken({ interactive: false }, (token) => {
+      if (token) {
+        chrome.identity.removeCachedAuthToken({ token }, () => {
+          fetch(`https://accounts.google.com/o/oauth2/revoke?token=${token}`);
+        });
+      }
+      chrome.storage.local.remove('authUser');
+      sendResponse({ success: true });
+    });
+    return true;
+  }
 });
 
 
@@ -107,6 +162,15 @@ class DriveSyncEngine {
         }
       });
     });
+  }
+
+  // 1b. Fetch the signed-in user's Google profile (email, name, picture)
+  static async getUserProfile(token) {
+    const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) throw new Error('userinfo_failed');
+    return res.json(); // { email, name, picture, ... }
   }
 
   // 2. Find the hidden file in the appDataFolder
@@ -140,8 +204,8 @@ class DriveSyncEngine {
 
   // 4. CSV Conversion
   static convertIssuesToCSV(issuesArray) {
-    if (!issuesArray || issuesArray.length === 0) return "Content,Issue Type,Subchallenge,Screenshot,Hash\n";
-    const headers = ["Content", "Issue Type", "Subchallenge", "Screenshot", "Hash"];
+    if (!issuesArray || issuesArray.length === 0) return "Content,Issue Type,Subchallenge,Screenshot,Hash,Lab Fix Type,Lab Comment\n";
+    const headers = ["Content", "Issue Type", "Subchallenge", "Screenshot", "Hash", "Lab Fix Type", "Lab Comment"];
     const lines = [headers.join(',')];
     issuesArray.forEach(issue => {
       const type = `"${(issue.type || "").replace(/"/g, '""')}"`;
@@ -150,7 +214,9 @@ class DriveSyncEngine {
       const context = `"${ctxText.replace(/"/g, '""')}"`;
       const screenshot = issue.screenshot ? `"${issue.screenshot}"` : `""`;
       const hash = `"${issue.hash || ""}"`;
-      lines.push([content, type, context, screenshot, hash].join(','));
+      const labFixType = `"${(issue.labFixType || "").replace(/"/g, '""')}"`;
+      const labComment = `"${(issue.labComment || "").replace(/"/g, '""')}"`;
+      lines.push([content, type, context, screenshot, hash, labFixType, labComment].join(','));
     });
     return lines.join('\n');
   }

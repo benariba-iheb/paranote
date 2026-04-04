@@ -1,0 +1,42 @@
+# ── Dependencies ─────────────────────────────────────────────────────────────
+node_modules*
+
+# ── Build outputs ─────────────────────────────────────────────────────────────
+dist/
+support/
+lab/
+
+# ── Vite cache ────────────────────────────────────────────────────────────────
+.vite/
+*.vite/
+
+# ── Environment & secrets ─────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── RBAC allowlist (contains real employee emails — never commit this) ────────
+src/auth/allowed-users.json
+
+# ── OS files ──────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ── Editor / IDE ─────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── TypeScript build info ─────────────────────────────────────────────────────
+*.tsbuildinfo

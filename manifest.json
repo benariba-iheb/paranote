@@ -15,11 +15,12 @@
     "*://*.lablabee.com/*"
   ],
   "action": {
-    "default_popup": "popup/popup.html",
+    "default_popup": "src/popup/popup.html",
     "default_title": "ParaNote Menu"
   },
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "src/background.js",
+    "type": "module"
   },
   "content_scripts": [
     {
@@ -28,16 +29,16 @@
         "*://*.lablabee.com/*"
       ],
       "js": [
-        "content/content.js"
-      ],
-      "css": [
-        "content/styles.css"
+        "src/content/content.tsx"
       ]
     }
   ],
   "oauth2": {
-    "client_id": "400263042707-mlumjd3lahadrjujlpq2fqqdpu1odfb3.apps.googleusercontent.com",
+    "client_id": "YOUR_APP_CLIENT_ID_GOES_HERE",
     "scopes": [
+      "openid",
+      "email",
+      "profile",
       "https://www.googleapis.com/auth/drive.appdata",
       "https://www.googleapis.com/auth/drive.file"
     ]
