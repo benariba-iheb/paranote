@@ -134,7 +134,7 @@ class ParaNoteEditor {
   currentScreenshot: string | null;
   currentMode: string;
   reactRoot: any;
-  anchorElement: HTMLElement | null;
+  anchorElement!: HTMLElement | null;
   mountPoint: HTMLElement;
   connectorPath: SVGPathElement;
 
@@ -182,7 +182,7 @@ class ParaNoteEditor {
     this.connectorPath.setAttribute("stroke", "#ffffff");
   }
 
-  open(hash, existingText = "", screenshotDataUrl = null, type = null, anchorElement = null, mode = "issue", existingNote = null) {
+  open(hash: string | null, existingText = "", screenshotDataUrl: string | null = null, type: string | null = null, anchorElement: HTMLElement | null = null, mode = "issue", existingNote: any = null) {
     this.currentHash = hash;
     this.currentScreenshot = screenshotDataUrl;
     this.currentMode = mode;
@@ -206,7 +206,7 @@ class ParaNoteEditor {
         screenshotUrl={screenshotDataUrl}
         existingNote={existingNote}
         onClose={() => this.close()}
-        onSave={(text: string, image: string, selectedType: string, labComment?: string, labFixType?: string) => this.finalizeSave(text, image, selectedType, labComment, labFixType)}
+        onSave={(text: string, image: string, selectedType: string, labComment?: string, labFixType?: string) => this.finalizeSave(text, image, selectedType, labComment ?? null, labFixType ?? null)}
         onDelete={() => this.deleteNote()}
       />
     );
@@ -232,13 +232,23 @@ class ParaNoteEditor {
     });
   }
 
-  finalizeSave(text, screenshotDataUrl, typeDesc, labComment, labFixType) {
+  finalizeSave(text: string, screenshotDataUrl: string | null, typeDesc: string, labComment: string | null, labFixType: string | null) {
     const isIssue = typeDesc && typeDesc !== "Note";
     // Support app always tags new issues as Pending so the Lab team can triage them.
     // The Lab app preserves whatever resolution the user selected.
     const effectiveLabFixType = (!isLab && isIssue) ? "Pending" : (labFixType || null);
 
-    const payload = {
+    const payload: {
+      hash: string | null;
+      content: string;
+      url: string;
+      timestamp: number;
+      type: string;
+      labComment: string | null;
+      labFixType: string | null;
+      taskContext: ReturnType<typeof extractCurrentTaskAndSubtask>;
+      screenshot?: string | null;
+    } = {
       hash: this.currentHash,
       content: text,
       url: window.location.href,
@@ -248,11 +258,7 @@ class ParaNoteEditor {
       labFixType: effectiveLabFixType,
       taskContext: extractCurrentTaskAndSubtask()
     };
-    if (screenshotDataUrl) {
-      payload.screenshot = screenshotDataUrl;
-    } else {
-      payload.screenshot = null;
-    }
+    payload.screenshot = screenshotDataUrl ?? null;
 
     chrome.runtime.sendMessage({ action: "SAVE_NOTE", payload: payload }, (response) => {
       if (response && response.success) {
@@ -313,7 +319,7 @@ class ParaNoteDisplay {
       if (!this.anchorElement) return;
       const rect = this.anchorElement.getBoundingClientRect();
       const documentY = window.scrollY + rect.top;
-      this.hostElement.dataset.originalY = documentY;
+      this.hostElement.dataset.originalY = String(documentY);
       const x = window.scrollX + rect.right + 15;
       this.hostElement.style.left = `${x}px`;
       if (!this.hostElement.style.top) this.hostElement.style.top = `${documentY}px`;
@@ -415,14 +421,14 @@ const editorComponent = new ParaNoteEditor();
 // ==========================================
 let isAppActive = false;
 let isViewModeActive = false; // Tracks if notes are currently visible on page
-let appAddingMode = null; // 'issue' or 'note'
-let appViewingMode = null; // 'issue' or 'note'
-let activeAddButton = null;
-let currentHoveredParagraph = null;
-let hideButtonTimeout = null;
-let loadedNotesData = []; // Store full note objects, not just hashes
+let appAddingMode: string | null = null; // 'issue' or 'note'
+let appViewingMode: string | null = null; // 'issue' or 'note'
+let activeAddButton: HTMLButtonElement | null = null;
+let currentHoveredParagraph: HTMLElement | null = null;
+let hideButtonTimeout: ReturnType<typeof setTimeout> | null = null;
+let loadedNotesData: any[] = []; // Store full note objects, not just hashes
 
-function generateTextHash(str) {
+function generateTextHash(str: string): string {
   let hash = 0;
   if (str.length === 0) return hash.toString(16);
   for (let i = 0; i < str.length; i++) { hash = (hash << 5) - hash + str.charCodeAt(i); hash |= 0; }
@@ -430,13 +436,15 @@ function generateTextHash(str) {
 }
 
 // --- The Hover Handlers (Add Note Button) ---
-function handleMouseOver(event) {
-  if (event.target === activeAddButton || (currentHoveredParagraph && currentHoveredParagraph.contains(event.target))) {
-    clearTimeout(hideButtonTimeout);
-    if (event.target === activeAddButton) return;
+function handleMouseOver(event: MouseEvent) {
+  const target = event.target as HTMLElement | null;
+  if (!target) return;
+  if (target === activeAddButton || (currentHoveredParagraph && currentHoveredParagraph.contains(target as Node))) {
+    clearTimeout(hideButtonTimeout ?? undefined);
+    if (target === activeAddButton) return;
   }
 
-  const paragraph = event.target.closest('p');
+  const paragraph = target.closest('p') as HTMLElement | null;
   if (!paragraph || paragraph === currentHoveredParagraph) return;
   if (activeAddButton) activeAddButton.remove();
 
@@ -468,21 +476,21 @@ function handleMouseOver(event) {
   activeAddButton.addEventListener('click', (e) => {
     e.stopPropagation();
     const textToLoad = existingNote ? existingNote.content : "";
-    const btn = activeAddButton;
+    const btn = activeAddButton!;
     btn.style.display = 'none'; // hide button so it isn't in screenshot
 
     let screenshotToUse = existingNote ? existingNote.screenshot : null;
     let typeToUse = existingNote ? existingNote.type : (appAddingMode === 'note' ? "Note" : "Content Typo");
 
-    editorComponent.open(textHash, textToLoad, screenshotToUse, typeToUse, paragraph, appAddingMode, existingNote);
+    editorComponent.open(textHash, textToLoad, screenshotToUse ?? null, typeToUse, paragraph, appAddingMode ?? 'issue', existingNote);
     if (btn && btn.parentNode) btn.remove();
     if (activeAddButton === btn) activeAddButton = null;
   });
 }
 
-function handleMouseOut(event) {
+function handleMouseOut(event: MouseEvent) {
   // Grace period to cross the gap
-  if (currentHoveredParagraph && !currentHoveredParagraph.contains(event.relatedTarget) && event.relatedTarget !== activeAddButton) {
+  if (currentHoveredParagraph && !currentHoveredParagraph.contains(event.relatedTarget as Node | null) && event.relatedTarget !== activeAddButton) {
     hideButtonTimeout = setTimeout(() => {
       if (activeAddButton) { activeAddButton.remove(); activeAddButton = null; }
       currentHoveredParagraph = null;
@@ -491,19 +499,19 @@ function handleMouseOut(event) {
 }
 
 // --- Highlight Function (Adds .paranote-highlighted class) ---
-function applyHighlights(notesList) {
+function applyHighlights(notesList: any[]) {
   if (!notesList || notesList.length === 0) return;
-  const notesMap = new Map(notesList.map(note => [note.hash, note]));
+  const notesMap = new Map(notesList.map((note: any) => [note.hash, note]));
   document.querySelectorAll('p').forEach(p => {
     const hash = generateTextHash(p.textContent.trim());
     if (notesMap.has(hash)) {
-      const noteData = notesMap.get(hash);
+      const noteData = notesMap.get(hash) as any;
       p.classList.add('paranote-highlighted');
-      p.style.setProperty('border-left-color', NOTE_TYPES[noteData.type] || '#34a853', 'important');
+      (p as HTMLElement).style.setProperty('border-left-color', NOTE_TYPES[noteData.type as keyof typeof NOTE_TYPES] || '#34a853', 'important');
       if (noteData.type === "Note") {
-        p.style.setProperty('background-color', 'rgba(52, 168, 83, 0.15)', 'important');
+        (p as HTMLElement).style.setProperty('background-color', 'rgba(52, 168, 83, 0.15)', 'important');
       } else {
-        p.style.removeProperty('background-color');
+        (p as HTMLElement).style.removeProperty('background-color');
       }
     }
   });
@@ -532,7 +540,7 @@ function clearHighlightsForMode(modeBeingActivated: string) {
 // 3. EXTENSION COMMANDS (The Switchboard)
 // ==========================================
 
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((request, _sender: unknown, sendResponse) => {
   if (request.action === "START_ADDING_ISSUE") {
     startApp('issue');
     sendResponse({ success: true });
@@ -561,7 +569,7 @@ function hideAddingMode() {
 }
 
 // COMMAND: Start Adding Notes
-function startApp(mode) {
+function startApp(mode: string) {
   if (isAppActive) {
     if (appAddingMode === mode) return; // already active in this mode
     hideAddingMode(); // Hide adding mode before restarting
@@ -577,7 +585,7 @@ function startApp(mode) {
   // 1. Fetch existing notes for context and apply highlights
   chrome.runtime.sendMessage({ action: "FETCH_NOTES_FOR_URL" }, (response) => {
     if (response && response.success && response.notes.length > 0) {
-      loadedNotesData = response.notes.filter(n => mode === 'note' ? n.type === "Note" : n.type !== "Note");
+      loadedNotesData = response.notes.filter((n: any) => mode === 'note' ? n.type === "Note" : n.type !== "Note");
       applyHighlights(loadedNotesData);
     }
   });
@@ -592,19 +600,21 @@ function resolveLayout() {
   if (hosts.length === 0) return;
 
   hosts.sort((a, b) => {
-    const aY = parseFloat(a.dataset.originalY || a.style.top);
-    const bY = parseFloat(b.dataset.originalY || b.style.top);
+    const aEl = a as HTMLElement;
+    const bEl = b as HTMLElement;
+    const aY = parseFloat(aEl.dataset.originalY || aEl.style.top);
+    const bY = parseFloat(bEl.dataset.originalY || bEl.style.top);
     return aY - bY;
   });
 
   let currentY = 0;
 
   for (let i = 0; i < hosts.length; i++) {
-    const host = hosts[i];
+    const host = hosts[i] as HTMLElement;
     if (host.style.display === 'none') continue;
 
     const intendedY = parseFloat(host.dataset.originalY || host.style.top);
-    if (!host.dataset.originalY) host.dataset.originalY = intendedY;
+    if (!host.dataset.originalY) host.dataset.originalY = String(intendedY);
 
     const actualY = Math.max(intendedY, currentY);
     host.style.top = `${actualY}px`;
@@ -640,7 +650,7 @@ window.addEventListener('scroll', () => {
 }, { capture: true, passive: true });
 
 // COMMAND: View Notes on Page (Anchored to Paragraphs)
-function showNotesOnPage(mode) {
+function showNotesOnPage(mode: string) {
   // If notes are exactly what is currently showing, toggle them off
   if (isViewModeActive && appViewingMode === mode) {
     hideVisibleNotes();
@@ -663,11 +673,11 @@ function showNotesOnPage(mode) {
   // Fetch fresh data (in case notes were updated)
   chrome.runtime.sendMessage({ action: "FETCH_NOTES_FOR_URL" }, (response) => {
     if (response && response.success && response.notes.length > 0) {
-      loadedNotesData = response.notes.filter(n => mode === 'note' ? n.type === "Note" : n.type !== "Note");
+      loadedNotesData = response.notes.filter((n: any) => mode === 'note' ? n.type === "Note" : n.type !== "Note");
       applyHighlights(loadedNotesData); // Ensure highlights are active
 
       // Create a lookup map for faster processing
-      const notesMap = new Map(loadedNotesData.map(note => [note.hash, note]));
+      const notesMap = new Map(loadedNotesData.map((note: any) => [note.hash, note]));
 
       // Scan the DOM for paragraphs matching the hashes
       document.querySelectorAll('p').forEach(p => {
@@ -710,14 +720,14 @@ function stopApp() {
   // 3. Remove Highlights
   document.querySelectorAll('.paranote-highlighted').forEach(p => {
     p.classList.remove('paranote-highlighted');
-    p.style.removeProperty('border-left-color');
-    p.style.removeProperty('background-color');
+    (p as HTMLElement).style.removeProperty('border-left-color');
+    (p as HTMLElement).style.removeProperty('background-color');
   });
 }
 
 // Listen for DELETIONS to remove highlights and UI
 window.addEventListener('paranote-deleted', (e) => {
-  const hash = e.detail.hash;
+  const hash = (e as CustomEvent).detail.hash;
 
   // Remove from in-memory array
   loadedNotesData = loadedNotesData.filter(n => n.hash !== hash);
@@ -732,15 +742,15 @@ window.addEventListener('paranote-deleted', (e) => {
   });
 
   if (isViewModeActive) {
-    showNotesOnPage();
+    showNotesOnPage(appViewingMode!);
   }
 });
 
 // Listen for newly saved notes to update highlights instantly
-window.addEventListener('paranote-saved', (e) => {
+window.addEventListener('paranote-saved', (_e) => {
   chrome.runtime.sendMessage({ action: "FETCH_NOTES_FOR_URL" }, (response) => {
     if (response && response.success && response.notes.length > 0) {
-      loadedNotesData = response.notes.filter(n => appAddingMode === 'note' ? n.type === "Note" : n.type !== "Note");
+      loadedNotesData = response.notes.filter((n: any) => appAddingMode === 'note' ? n.type === "Note" : n.type !== "Note");
       applyHighlights(loadedNotesData);
     }
   });
@@ -773,13 +783,13 @@ function extractCurrentTaskAndSubtask() {
 
   const menuItems = sidebar.querySelectorAll('.MuiMenuItem-root');
   for (const item of menuItems) {
-    if (item.style.borderLeft && item.style.borderLeft.includes('rgb(31, 28, 86)')) {
+    if ((item as HTMLElement).style.borderLeft && (item as HTMLElement).style.borderLeft.includes('rgb(31, 28, 86)')) {
       const textEl = item.querySelector('.MuiTypography-root');
-      if (textEl) activeTask = textEl.textContent.trim();
+      if (textEl) activeTask = textEl.textContent?.trim() ?? activeTask;
     }
-    if (item.style.backgroundColor && item.style.backgroundColor.includes('rgb(238, 238, 238)')) {
+    if ((item as HTMLElement).style.backgroundColor && (item as HTMLElement).style.backgroundColor.includes('rgb(238, 238, 238)')) {
       const textEl = item.querySelector('.MuiTypography-root');
-      if (textEl) activeSubtask = textEl.textContent.trim();
+      if (textEl) activeSubtask = textEl.textContent?.trim() ?? null;
     }
   }
 
