@@ -122,21 +122,40 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // CHECK_AUTH — verify the signed-in Google account is on the allowlist
   if (request.action === "CHECK_AUTH") {
-    chrome.identity.getAuthToken({ interactive: true }, async (token) => {
-      if (chrome.runtime.lastError || !token) {
-        sendResponse({ success: false, allowed: false, error: 'no_token' });
-        return;
-      }
-      try {
-        const profile = await DriveSyncEngine.getUserProfile(token);
-        const allowed = ALLOWED_EMAILS.includes(profile.email.toLowerCase());
-        const authUser = { email: profile.email, name: profile.name, picture: profile.picture, allowed };
-        chrome.storage.local.set({ authUser });
-        sendResponse({ success: true, allowed, email: profile.email, name: profile.name, picture: profile.picture });
-      } catch (e) {
-        sendResponse({ success: false, allowed: false, error: 'profile_fetch_failed' });
+    // Remove any cached token first so the user always sees the full scope-grant screen.
+    // This ensures drive.file is included — a cached token from before Drive scopes
+    // were added would silently omit them and cause 403 errors on backup.
+    chrome.identity.getAuthToken({ interactive: false }, (oldToken) => {
+      if (oldToken) {
+        chrome.identity.removeCachedAuthToken({ token: oldToken }, () => doAuth());
+      } else {
+        doAuth();
       }
     });
+
+    function doAuth() {
+      chrome.identity.getAuthToken({ interactive: true }, async (token) => {
+        if (chrome.runtime.lastError || !token) {
+          sendResponse({ success: false, allowed: false, error: 'no_token' });
+          return;
+        }
+        try {
+          const profile = await DriveSyncEngine.getUserProfile(token);
+          const email = profile.email.toLowerCase();
+          const allowed = ALLOWED_EMAILS.some(entry => {
+            if (entry.startsWith('*@')) {
+              return email.endsWith(entry.slice(1));
+            }
+            return entry === email;
+          });
+          const authUser = { email: profile.email, name: profile.name, picture: profile.picture, allowed };
+          chrome.storage.local.set({ authUser });
+          sendResponse({ success: true, allowed, email: profile.email, name: profile.name, picture: profile.picture });
+        } catch (e) {
+          sendResponse({ success: false, allowed: false, error: 'profile_fetch_failed' });
+        }
+      });
+    }
     return true;
   }
 
@@ -163,14 +182,39 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 const DRIVE_FILE_NAME = 'paranote_backup.json';
 
 class DriveSyncEngine {
-  // 1. Get OAuth Token
+  // --- Helper: wraps fetch for Drive API calls and throws with detailed Google errors ---
+  static async driveRequest(url, options = {}) {
+    const res = await fetch(url, options);
+    if (!res.ok) {
+      let body = '';
+      try { body = await res.text(); } catch (_) { /* ignore */ }
+      throw new Error(`Drive API ${res.status} on ${url.split('?')[0].split('/').slice(-2).join('/')} — ${body}`);
+    }
+    return res;
+  }
+
+  // 1. Get OAuth Token — always flushes stale cache to avoid 401 "Invalid Credentials"
   static async getToken() {
     return new Promise((resolve, reject) => {
-      chrome.identity.getAuthToken({ interactive: true }, function (token) {
-        if (chrome.runtime.lastError || !token) {
-          reject(chrome.runtime.lastError);
+      // Step 1: check for a cached token (non-interactive, so no popup)
+      chrome.identity.getAuthToken({ interactive: false }, (staleToken) => {
+        const fetchFreshToken = () => {
+          // Step 2: get a new valid token (interactive only if truly needed)
+          chrome.identity.getAuthToken({ interactive: true }, (token) => {
+            if (chrome.runtime.lastError || !token) {
+              reject(chrome.runtime.lastError || new Error('No token returned'));
+            } else {
+              resolve(token);
+            }
+          });
+        };
+
+        if (staleToken) {
+          // Remove the potentially expired token from Chrome's local cache,
+          // then request a fresh one. No popup appears if the user session is active.
+          chrome.identity.removeCachedAuthToken({ token: staleToken }, fetchFreshToken);
         } else {
-          resolve(token);
+          fetchFreshToken();
         }
       });
     });
@@ -286,7 +330,7 @@ class DriveSyncEngine {
   static async getOrCreateFolder(token, folderName, parentId = null) {
     const parentQuery = parentId ? ` and '${parentId}' in parents` : "";
     const query = encodeURIComponent(`mimeType='application/vnd.google-apps.folder' and name='${folderName}' and trashed=false${parentQuery}`);
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}`, {
+    const res = await this.driveRequest(`https://www.googleapis.com/drive/v3/files?q=${query}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     const data = await res.json();
@@ -295,30 +339,32 @@ class DriveSyncEngine {
     const requestBody = { name: folderName, mimeType: 'application/vnd.google-apps.folder' };
     if (parentId) requestBody.parents = [parentId];
 
-    const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+    const createRes = await this.driveRequest('https://www.googleapis.com/drive/v3/files', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody)
     });
     const createData = await createRes.json();
+    if (!createData.id) throw new Error(`Folder creation returned no ID for "${folderName}" — response: ${JSON.stringify(createData)}`);
     return createData.id;
   }
 
   // 6. Get or Create Visible CSV File
   static async getOrCreateCsvFile(token, folderId, fileName) {
     const query = encodeURIComponent(`name='${fileName}' and '${folderId}' in parents and trashed=false`);
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}`, {
+    const res = await this.driveRequest(`https://www.googleapis.com/drive/v3/files?q=${query}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     const data = await res.json();
     if (data.files && data.files.length > 0) return data.files[0].id;
 
-    const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+    const createRes = await this.driveRequest('https://www.googleapis.com/drive/v3/files', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: fileName, parents: [folderId] })
     });
     const createData = await createRes.json();
+    if (!createData.id) throw new Error(`File creation returned no ID for "${fileName}" — response: ${JSON.stringify(createData)}`);
     return createData.id;
   }
 

@@ -49,6 +49,14 @@ globalStyles.textContent = `
     50%  { background-color: rgba(255,255,255,0.12); }
     100% { background-color: rgba(255,255,255,0.06); }
   }
+  @keyframes pn-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  @keyframes pn-zoom-in {
+    from { opacity: 0; transform: scale(0.82); }
+    to   { opacity: 1; transform: scale(1);    }
+  }
 
   /* === Trigger Button === */
   .paranote-trigger-btn {
@@ -625,9 +633,34 @@ function resolveLayout() {
   }
 }
 
+
+// Continuously re-run resolveLayout on every animation frame for the duration
+// of the card expand/collapse CSS transition (300ms), so cards below track the
+// growing/shrinking card in real time with no collision at any frame.
+let _rafId: number | null = null;
+let _rafDeadline = 0;
+
+function startLayoutAnimation() {
+  // Each trigger resets the deadline to 330ms from now (300ms anim + buffer)
+  _rafDeadline = performance.now() + 330;
+  if (_rafId !== null) return; // loop already running
+
+  const loop = (now: number) => {
+    resolveLayout();
+    if (now < _rafDeadline) {
+      _rafId = requestAnimationFrame(loop);
+    } else {
+      resolveLayout(); // final authoritative pass after animation ends
+      _rafId = null;
+    }
+  };
+  _rafId = requestAnimationFrame(loop);
+}
+
 window.addEventListener('paranote-layout-changed', () => {
-  resolveLayout();
+  startLayoutAnimation();
 });
+
 
 let isScrolling = false;
 window.addEventListener('scroll', () => {
