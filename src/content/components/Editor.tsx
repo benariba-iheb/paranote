@@ -170,7 +170,7 @@ export function EditorOverlay({
       </CardContent>
 
       <CardFooter className="p-3 pt-0 flex gap-2">
-        {(initialText || screenshotUrl) && (
+        {!isLab && (initialText || screenshotUrl) && (
           <Button variant="destructive" className="flex-1 h-8 text-xs font-semibold" onClick={onDelete}>
             <Trash2 className="h-3 w-3 mr-1" /> Delete
           </Button>

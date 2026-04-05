@@ -1,5 +1,6 @@
 // background.js - Manifest V3 Service Worker
 import allowedUsers from './auth/allowed-users.json';
+import * as XLSX from 'xlsx';
 
 const APP_TARGET = import.meta.env.VITE_APP_TARGET || 'support';
 const ALLOWED_EMAILS = (allowedUsers[APP_TARGET] || []).map(e => e.toLowerCase());
@@ -28,10 +29,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // 2. ACTUAL SAVE LOGIC
   if (request.action === "SAVE_NOTE") {
-    chrome.storage.local.get(['notesDatabase', 'issuesDatabase'], (result) => {
+    chrome.storage.local.get(['notesDatabase', 'issuesDatabase', 'authUser'], (result) => {
       const isNote = request.payload.type === "Note";
       const db = isNote ? (result.notesDatabase || []) : (result.issuesDatabase || []);
       const domain = sender.tab && sender.tab.url ? new URL(sender.tab.url).hostname : "unknown";
+      const authorName = result.authUser
+        ? (result.authUser.name || result.authUser.email || 'Unknown')
+        : 'Unknown';
 
       const incomingNote = {
         hash: request.payload.hash,
@@ -63,8 +67,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           // Lab resolution fields: only overwrite when the incoming value is non-null
           labComment: incomingNote.labComment  !== null ? incomingNote.labComment  : existing.labComment,
           labFixType: incomingNote.labFixType  !== null ? incomingNote.labFixType  : existing.labFixType,
+          // Authorship: keep original author, always update last modifier
+          lastModifiedBy: authorName,
         };
       } else {
+        incomingNote.author = authorName;
+        incomingNote.lastModifiedBy = authorName;
         db.push(incomingNote);
       }
 
@@ -84,9 +92,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       let issuesDb = result.issuesDatabase || [];
       const domain = sender.tab && sender.tab.url ? new URL(sender.tab.url).hostname : "unknown";
 
-      notesDb = notesDb.filter(n => !(n.hash === request.hash && n.domain === domain));
-      issuesDb = issuesDb.filter(n => !(n.hash === request.hash && n.domain === domain));
-
+      // Only delete from the matching database, not both — prevents a note and
+      // an issue on the same paragraph from wiping each other out.
+      if (request.isNote) {
+        notesDb = notesDb.filter(n => !(n.hash === request.hash && n.domain === domain));
+      } else {
+        issuesDb = issuesDb.filter(n => !(n.hash === request.hash && n.domain === domain));
+      }
       chrome.storage.local.set({ notesDatabase: notesDb, issuesDatabase: issuesDb }, () => {
         sendResponse({ success: true });
       });
@@ -204,8 +216,8 @@ class DriveSyncEngine {
 
   // 4. CSV Conversion
   static convertIssuesToCSV(issuesArray) {
-    if (!issuesArray || issuesArray.length === 0) return "Content,Issue Type,Subchallenge,Screenshot,Hash,Lab Fix Type,Lab Comment\n";
-    const headers = ["Content", "Issue Type", "Subchallenge", "Screenshot", "Hash", "Lab Fix Type", "Lab Comment"];
+    if (!issuesArray || issuesArray.length === 0) return "Content,Issue Type,Subchallenge,Screenshot,Hash,Lab Fix Type,Lab Comment,Author,Last Modified By\n";
+    const headers = ["Content", "Issue Type", "Subchallenge", "Screenshot", "Hash", "Lab Fix Type", "Lab Comment", "Author", "Last Modified By"];
     const lines = [headers.join(',')];
     issuesArray.forEach(issue => {
       const type = `"${(issue.type || "").replace(/"/g, '""')}"`;
@@ -216,15 +228,17 @@ class DriveSyncEngine {
       const hash = `"${issue.hash || ""}"`;
       const labFixType = `"${(issue.labFixType || "").replace(/"/g, '""')}"`;
       const labComment = `"${(issue.labComment || "").replace(/"/g, '""')}"`;
-      lines.push([content, type, context, screenshot, hash, labFixType, labComment].join(','));
+      const author = `"${(issue.author || "").replace(/"/g, '""')}"`;
+      const lastModifiedBy = `"${(issue.lastModifiedBy || "").replace(/"/g, '""')}"`;
+      lines.push([content, type, context, screenshot, hash, labFixType, labComment, author, lastModifiedBy].join(','));
     });
     return lines.join('\n');
   }
 
   // 5. Notes CSV Conversion
   static convertNotesToCSV(notesArray) {
-    if (!notesArray || notesArray.length === 0) return "Content,Context,Screenshot,Hash\n";
-    const headers = ["Content", "Context", "Screenshot", "Hash"];
+    if (!notesArray || notesArray.length === 0) return "Content,Context,Screenshot,Hash,Author,Last Modified By\n";
+    const headers = ["Content", "Context", "Screenshot", "Hash", "Author", "Last Modified By"];
     const lines = [headers.join(',')];
     notesArray.forEach(note => {
       const content = `"${(note.content || "").replace(/"/g, '""')}"`;
@@ -232,9 +246,40 @@ class DriveSyncEngine {
       const context = `"${ctxText.replace(/"/g, '""')}"`;
       const screenshot = note.screenshot ? `"${note.screenshot}"` : `""`;
       const hash = `"${note.hash || ""}"`;
-      lines.push([content, context, screenshot, hash].join(','));
+      const author = `"${(note.author || "").replace(/"/g, '""')}"`;
+      const lastModifiedBy = `"${(note.lastModifiedBy || "").replace(/"/g, '""')}"`;
+      lines.push([content, context, screenshot, hash, author, lastModifiedBy].join(','));
     });
     return lines.join('\n');
+  }
+
+  // 4b. Issues XLSX Conversion
+  static convertIssuesToXlsx(issuesArray) {
+    const rows = (issuesArray || []).map(issue => ({
+      'Content':         issue.content   || '',
+      'Issue Type':      issue.type      || '',
+      'Subchallenge':    issue.taskContext ? `${issue.taskContext.activeTask || ''} / ${issue.taskContext.activeSubtask || ''}` : 'Unknown',
+      'Screenshot':      issue.screenshot || 'NA',
+      'Lab Fix Type':    issue.labFixType || '',
+      'Lab Comment':     issue.labComment || ''
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Issues');
+    return XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+  }
+
+  // 5b. Notes XLSX Conversion
+  static convertNotesToXlsx(notesArray) {
+    const rows = (notesArray || []).map(note => ({
+      'Content':    note.content || '',
+      'Context':    note.taskContext ? `${note.taskContext.activeTask || ''} / ${note.taskContext.activeSubtask || ''}` : 'Unknown',
+      'Screenshot': note.screenshot || 'NA'
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Notes');
+    return XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
   }
 
   // 5. Get or Create Visible Folder
@@ -311,7 +356,7 @@ class DriveSyncEngine {
   }
 
   // 8. Universal Export Pipeline
-  static async exportDataCategory(token, dataArray, rootFolderName, fileNamePrefix, conversionFunction) {
+  static async exportDataCategory(token, dataArray, rootFolderName, fileNamePrefix, conversionFunction, xlsxConversionFunction) {
       console.log(`ParaNote: Exporting to /${rootFolderName}/ folder...`);
       const rootFolderId = await this.getOrCreateFolder(token, rootFolderName);
 
@@ -327,7 +372,8 @@ class DriveSyncEngine {
       for (const [labName, group] of Object.entries(groupedData)) {
         console.log(`ParaNote: Exporting group ${labName}...`);
         const labFolderId = await this.getOrCreateFolder(token, labName, rootFolderId);
-        const csvFileId = await this.getOrCreateCsvFile(token, labFolderId, `${fileNamePrefix}_export.csv`);
+        const csvFileId  = await this.getOrCreateCsvFile(token, labFolderId, `${fileNamePrefix}_export.csv`);
+        const xlsxFileId = await this.getOrCreateCsvFile(token, labFolderId, `${fileNamePrefix}_export.xlsx`);
         const screenshotsFolderId = await this.getOrCreateFolder(token, 'screenshots', labFolderId);
 
         let exportArray = JSON.parse(JSON.stringify(group)); // Deep clone
@@ -344,8 +390,8 @@ class DriveSyncEngine {
           }
         }
 
+        // --- CSV upload ---
         const csvString = conversionFunction(exportArray);
-        
         const csvRes = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${csvFileId}?uploadType=media`, {
           method: 'PATCH',
           headers: {
@@ -355,6 +401,18 @@ class DriveSyncEngine {
           body: csvString
         });
         if (!csvRes.ok) throw new Error(`CSV Upload Failed for ${labName}`);
+
+        // --- XLSX upload (mirror of CSV) ---
+        const xlsxData = xlsxConversionFunction(exportArray);
+        const xlsxRes = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${xlsxFileId}?uploadType=media`, {
+          method: 'PATCH',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          },
+          body: new Uint8Array(xlsxData)
+        });
+        if (!xlsxRes.ok) throw new Error(`XLSX Upload Failed for ${labName}`);
       }
   }
 
@@ -367,10 +425,10 @@ class DriveSyncEngine {
 
       // Execute dual export pipelines
       if (localData.issuesDatabase && localData.issuesDatabase.length > 0) {
-        await this.exportDataCategory(token, localData.issuesDatabase, 'lab_issues', 'issues', this.convertIssuesToCSV);
+        await this.exportDataCategory(token, localData.issuesDatabase, 'lab_issues', 'issues', this.convertIssuesToCSV, this.convertIssuesToXlsx);
       }
       if (localData.notesDatabase && localData.notesDatabase.length > 0) {
-        await this.exportDataCategory(token, localData.notesDatabase, 'notes', 'notes', this.convertNotesToCSV);
+        await this.exportDataCategory(token, localData.notesDatabase, 'notes', 'notes', this.convertNotesToCSV, this.convertNotesToXlsx);
       }
 
       // -- ORIGINAL: Keep Hidden Sync JSON Backup for State Restore --

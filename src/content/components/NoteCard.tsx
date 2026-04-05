@@ -25,6 +25,8 @@ export function NoteCard({
   screenshotHtml,
   labComment: initialLabComment,
   labFixType: initialLabFixType,
+  author,
+  lastModifiedBy,
   onDelete,
   onHeightChange
 }: any) {
@@ -110,14 +112,16 @@ export function NoteCard({
         )}
         style={{ borderLeftColor: typeColor }}
       >
-        <Button
-          variant="ghost"
-          size="icon"
-          className="absolute top-1 right-1 h-6 w-6 text-muted-foreground hover:bg-destructive/20 hover:text-destructive opacity-0 group-hover:opacity-100 transition-all duration-200 hover:scale-110 z-10"
-          onClick={handleDelete}
-        >
-          <X className="h-3 w-3" />
-        </Button>
+        {!isLab && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="absolute top-1 right-1 h-6 w-6 text-muted-foreground hover:bg-destructive/20 hover:text-destructive opacity-0 group-hover:opacity-100 transition-all duration-200 hover:scale-110 z-10"
+            onClick={handleDelete}
+          >
+            <X className="h-3 w-3" />
+          </Button>
+        )}
 
         <div className="pt-3 px-3">
           <Badge
@@ -257,6 +261,24 @@ export function NoteCard({
             </div>
           )}
         </CardContent>
+
+        {/* Author info — hidden until card is hovered */}
+        {(author || lastModifiedBy) && (
+          <div className="overflow-hidden max-h-0 group-hover:max-h-16 transition-all duration-300 px-3 border-t-0 group-hover:border-t group-hover:border-white/5 group-hover:pb-2 group-hover:pt-1.5 flex flex-col gap-0.5">
+            {author && (
+              <div className="text-[9px] text-slate-400 flex items-center gap-1 truncate">
+                <span>✍</span>
+                <span className="truncate">by {author}</span>
+              </div>
+            )}
+            {lastModifiedBy && lastModifiedBy !== author && (
+              <div className="text-[9px] text-slate-500 flex items-center gap-1 truncate">
+                <span>↻</span>
+                <span className="truncate">edited by {lastModifiedBy}</span>
+              </div>
+            )}
+          </div>
+        )}
 
         {isTruncatable && (
           <button

@@ -39,10 +39,6 @@ globalStyles.textContent = `
     from { opacity: 0; transform: translateX(8px) scale(0.96); }
     to   { opacity: 1; transform: translateX(0)  scale(1);    }
   }
-  @keyframes paranote-fade-in {
-    from { opacity: 0; }
-    to   { opacity: 1; }
-  }
   @keyframes paranote-pop-in {
     0%   { opacity: 0; transform: scale(0.85); }
     60%  { transform: scale(1.04); }
@@ -136,6 +132,7 @@ class ParaNoteEditor {
   shadowRoot: ShadowRoot;
   currentHash: string | null;
   currentScreenshot: string | null;
+  currentMode: string;
   reactRoot: any;
   anchorElement: HTMLElement | null;
   mountPoint: HTMLElement;
@@ -148,6 +145,7 @@ class ParaNoteEditor {
     this.shadowRoot = this.hostElement.attachShadow({ mode: 'open' });
     this.currentHash = null;
     this.currentScreenshot = null;
+    this.currentMode = 'issue';
     this.reactRoot = createRoot(this.shadowRoot);
 
     // Inject Tailwind styles directly into shadow DOM
@@ -187,6 +185,7 @@ class ParaNoteEditor {
   open(hash, existingText = "", screenshotDataUrl = null, type = null, anchorElement = null, mode = "issue", existingNote = null) {
     this.currentHash = hash;
     this.currentScreenshot = screenshotDataUrl;
+    this.currentMode = mode;
     this.anchorElement = anchorElement;
 
     this.hostElement.style.display = 'block';
@@ -225,7 +224,7 @@ class ParaNoteEditor {
   }
 
   deleteNote() {
-    chrome.runtime.sendMessage({ action: "DELETE_NOTE", hash: this.currentHash }, (response) => {
+    chrome.runtime.sendMessage({ action: "DELETE_NOTE", hash: this.currentHash, isNote: this.currentMode === 'note' }, (response) => {
       if (response && response.success) {
         this.close();
         window.dispatchEvent(new CustomEvent('paranote-deleted', { detail: { hash: this.currentHash } }));
@@ -357,8 +356,11 @@ class ParaNoteDisplay {
         screenshotHtml={screenshotHtml}
         labComment={noteData.labComment || null}
         labFixType={noteData.labFixType || null}
+        author={noteData.author || null}
+        lastModifiedBy={noteData.lastModifiedBy || null}
         onDelete={(h: string) => {
-          chrome.runtime.sendMessage({ action: "DELETE_NOTE", hash: h }, (response) => {
+          const isNote = noteData.type === "Note";
+          chrome.runtime.sendMessage({ action: "DELETE_NOTE", hash: h, isNote }, (response) => {
             if (response && response.success) {
               window.dispatchEvent(new CustomEvent('paranote-deleted', { detail: { hash: h } }));
             }
