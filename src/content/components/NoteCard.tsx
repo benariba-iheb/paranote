@@ -28,6 +28,7 @@ export function NoteCard({
   labFixType: initialLabFixType,
   author,
   lastModifiedBy,
+  fixedBy,
   onDelete,
   onHeightChange
 }: any) {
@@ -214,6 +215,12 @@ export function NoteCard({
                     "{initialLabComment}"
                   </div>
                 )}
+                {fixedBy && (
+                  <div className="text-[10px] text-zinc-500 flex items-center gap-1 mt-0.5">
+                    <span>🔧</span>
+                    <span>Fixed by {fixedBy}</span>
+                  </div>
+                )}
               </div>
             )}
 
@@ -289,8 +296,8 @@ export function NoteCard({
           </CardContent>
 
           {/* Author info — hidden until card is hovered */}
-          {(author || lastModifiedBy) && (
-            <div className="overflow-hidden max-h-0 group-hover:max-h-16 transition-all duration-300 px-3 border-t-0 group-hover:border-t group-hover:border-white/5 group-hover:pb-2 group-hover:pt-1.5 flex flex-col gap-0.5">
+          {(author || lastModifiedBy || fixedBy) && (
+            <div className="overflow-hidden max-h-0 group-hover:max-h-20 transition-all duration-300 px-3 border-t-0 group-hover:border-t group-hover:border-white/5 group-hover:pb-2 group-hover:pt-1.5 flex flex-col gap-0.5">
               {author && (
                 <div className="text-[9px] text-slate-400 flex items-center gap-1 truncate">
                   <span>✍</span>
@@ -301,6 +308,12 @@ export function NoteCard({
                 <div className="text-[9px] text-slate-500 flex items-center gap-1 truncate">
                   <span>↻</span>
                   <span className="truncate">edited by {lastModifiedBy}</span>
+                </div>
+              )}
+              {fixedBy && (
+                <div className="text-[9px] text-emerald-400/70 flex items-center gap-1 truncate">
+                  <span>🔧</span>
+                  <span className="truncate">fixed by {fixedBy}</span>
                 </div>
               )}
             </div>

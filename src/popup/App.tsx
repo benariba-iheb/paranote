@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
-import { PlusCircle, FileText, Eye, Ban, CloudUpload, CloudDownload, LogOut, Loader2, ShieldX } from "lucide-react"
+import { PlusCircle, FileText, Eye, Ban, CloudUpload, CloudDownload, LogOut, Loader2, ShieldX, Key, Settings } from "lucide-react"
 
 const isLab = import.meta.env.VITE_APP_TARGET === 'lab';
 
-type AuthState = 'checking' | 'unauthorized' | 'authorized';
+type AuthState = 'setup' | 'checking' | 'unauthorized' | 'authorized';
 
 interface AuthUser {
   email: string;
@@ -19,16 +19,23 @@ export function App() {
   const [statusMsg, setStatusMsg] = useState("")
   const [statusColor, setStatusColor] = useState("text-muted-foreground")
   const [isDisabled, setIsDisabled] = useState(false)
+  const [clientIdInput, setClientIdInput] = useState("")
+  const [folderIdInput, setFolderIdInput] = useState("")
+  const [showBackupWarning, setShowBackupWarning] = useState(false)
 
-  useEffect(() => {
-    // 1. Check cached auth first (avoids re-prompting on every open)
-    chrome.storage.local.get(['authUser'], (result: { authUser?: AuthUser }) => {
+  const checkAuth = () => {
+    setAuthState('checking')
+    chrome.storage.local.get(['clientId', 'folderId', 'authUser'], (result: any) => {
+      if (!result.clientId || !result.folderId) {
+        setAuthState('setup')
+        return
+      }
+
       if (result.authUser && result.authUser.allowed) {
         setAuthUser(result.authUser)
         setAuthState('authorized')
         runDomainCheck()
       } else {
-        // 2. No valid cache — trigger interactive Google sign-in + allowlist check
         chrome.runtime.sendMessage({ action: "CHECK_AUTH" }, (response) => {
           if (chrome.runtime.lastError || !response?.success) {
             setAuthState('unauthorized')
@@ -51,6 +58,10 @@ export function App() {
         })
       }
     })
+  }
+
+  useEffect(() => {
+    checkAuth()
   }, [])
 
   const runDomainCheck = () => {
@@ -74,21 +85,37 @@ export function App() {
     setIsDisabled(true)
   }
 
+  const handleSaveConfig = () => {
+    if (!clientIdInput.trim() || !folderIdInput.trim()) return;
+    
+    let parsedFolderId = folderIdInput.trim();
+    // Try to extract ID if they pasted a full Google Drive URL
+    if (parsedFolderId.includes('drive.google.com/drive/folders/')) {
+        parsedFolderId = parsedFolderId.split('folders/')[1].split('?')[0].split('/')[0];
+    } else if (parsedFolderId.includes('id=')) {
+        const match = parsedFolderId.match(/[?&]id=([^&]+)/);
+        if (match) parsedFolderId = match[1];
+    }
+
+    chrome.storage.local.set({ 
+      clientId: clientIdInput.trim(),
+      folderId: parsedFolderId 
+    }, () => {
+      checkAuth()
+    })
+  }
+
   const handleSignOut = () => {
     chrome.runtime.sendMessage({ action: "SIGN_OUT" }, () => {
       setAuthState('checking')
       setAuthUser(null)
-      // Re-trigger auth so user can pick a different account
-      chrome.runtime.sendMessage({ action: "CHECK_AUTH" }, (response) => {
-        if (response?.allowed) {
-          setAuthUser({ email: response.email, name: response.name, picture: response.picture, allowed: true })
-          setAuthState('authorized')
-          runDomainCheck()
-        } else {
-          setAuthUser(response ? { email: response.email, name: response.name, picture: response.picture, allowed: false } : null)
-          setAuthState('unauthorized')
-        }
-      })
+      checkAuth()
+    })
+  }
+
+  const handleResetConfig = () => {
+    chrome.storage.local.remove(['clientId', 'folderId'], () => {
+      handleSignOut()
     })
   }
 
@@ -126,6 +153,69 @@ export function App() {
 
   const bg = isLab ? "bg-[#0f172a]" : "bg-neutral-900"
 
+  // ── Setup state ──────────────────────────────────────────────────────────────
+  if (authState === 'setup') {
+    const redirectUri = typeof chrome !== 'undefined' && chrome.identity ? chrome.identity.getRedirectURL() : "";
+    return (
+      <div className={`w-[240px] p-4 flex flex-col gap-3 font-sans text-white ${bg}`}>
+        <div className="flex items-center gap-2 text-blue-400 mb-1">
+          <Key className="h-5 w-5 shrink-0" />
+          <span className="font-semibold text-sm">App Configuration</span>
+        </div>
+        <p className="text-[11px] text-slate-300 leading-snug">
+          Please enter a Web Application Google OAuth Client ID to connect to Google Drive.
+        </p>
+        <div className="bg-blue-900/40 p-2 rounded border border-blue-500/30">
+          <p className="text-[10px] text-blue-200 mb-1 leading-tight">Must add this exact URL to "Authorized redirect URIs" in GCP:</p>
+          <code className="text-[9px] break-all select-all text-white bg-black/50 p-1 rounded block font-mono">
+            {redirectUri}
+          </code>
+        </div>
+        <input 
+          type="text" 
+          value={clientIdInput}
+          onChange={(e) => setClientIdInput(e.target.value)}
+          placeholder="Web App Client ID..."
+          className="w-full text-xs p-2 bg-black/30 border border-white/20 rounded text-white focus:outline-none focus:border-blue-400"
+        />
+        <input 
+          type="text" 
+          value={folderIdInput}
+          onChange={(e) => setFolderIdInput(e.target.value)}
+          placeholder="Google Drive Shared Folder ID..."
+          className="w-full text-xs p-2 bg-black/30 border border-white/20 rounded text-white focus:outline-none focus:border-blue-400"
+        />
+        <Button onClick={handleSaveConfig} className="w-full h-8 text-xs font-bold mt-1" variant="default">
+          Save Configuration
+        </Button>
+      </div>
+    )
+  }
+
+  if (showBackupWarning) {
+    return (
+      <div className={`w-[240px] p-4 flex flex-col gap-3 font-sans text-white ${bg}`}>
+        <div className="flex items-center gap-2 text-yellow-500 mb-1">
+          <ShieldX className="h-5 w-5 shrink-0" />
+          <span className="font-semibold text-sm">Caution</span>
+        </div>
+        <p className="text-[11px] text-slate-300 leading-snug">
+          Due to the app not having a backend, concurrent backup requests may cause some issues.
+          <br/><br/>
+          Please communicate to the lab owner or the tester before backing up!
+        </p>
+        <div className="flex gap-2 mt-2">
+          <Button onClick={() => setShowBackupWarning(false)} className="flex-1 h-8 text-xs font-bold" variant="secondary">
+            Cancel
+          </Button>
+          <Button onClick={() => { setShowBackupWarning(false); sendToCloud("BACKUP_TO_CLOUD", "Backing up to Drive..."); }} className="flex-1 h-8 text-xs font-bold bg-yellow-600 hover:bg-yellow-700 text-white border-transparent">
+            Proceed
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   // ── Checking state ───────────────────────────────────────────────────────────
   if (authState === 'checking') {
     return (
@@ -148,15 +238,26 @@ export function App() {
             <br />is not authorised to use this extension.
           </p>
         )}
-        <Button
-          variant="outline"
-          size="sm"
-          className="w-full mt-1 gap-2 text-xs"
-          onClick={handleSignOut}
-        >
-          <LogOut className="h-3 w-3" />
-          Sign in with a different account
-        </Button>
+        <div className="flex flex-col gap-1 w-full mt-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full gap-2 text-xs"
+            onClick={checkAuth}
+          >
+            <LogOut className="h-3 w-3" />
+            Retry Login
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full gap-2 text-[10px] text-muted-foreground hover:text-white"
+            onClick={handleResetConfig}
+          >
+            <Settings className="h-3 w-3" />
+            Reset Client ID Config
+          </Button>
+        </div>
       </div>
     )
   }
@@ -177,6 +278,15 @@ export function App() {
           <p className="text-[11px] font-medium truncate">{authUser?.name}</p>
           <p className="text-[10px] text-muted-foreground truncate">{authUser?.email}</p>
         </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6 shrink-0 text-muted-foreground hover:text-white"
+          title="Reset Client ID Config"
+          onClick={handleResetConfig}
+        >
+          <Settings className="h-3 w-3" />
+        </Button>
         <Button
           variant="ghost"
           size="icon"

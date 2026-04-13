@@ -372,6 +372,7 @@ class ParaNoteDisplay {
         labFixType={noteData.labFixType || null}
         author={noteData.author || null}
         lastModifiedBy={noteData.lastModifiedBy || null}
+        fixedBy={noteData.fixedBy || null}
         onDelete={(h: string) => {
           const isNote = noteData.type === "Note";
           chrome.runtime.sendMessage({ action: "DELETE_NOTE", hash: h, isNote }, (response) => {

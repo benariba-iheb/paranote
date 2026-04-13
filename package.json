@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:support": "VITE_APP_TARGET=support vite build",
-    "build:lab": "VITE_APP_TARGET=lab vite build"
+    "build:support": "cross-env VITE_APP_TARGET=support vite build",
+    "build:lab": "cross-env VITE_APP_TARGET=lab vite build"
   },
   "keywords": [],
   "author": "",
@@ -34,6 +34,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.27",
+    "cross-env": "^10.1.0",
     "postcss": "^8.5.8",
     "tailwindcss": "^3.4.1",
     "typescript": "^5.7.3",

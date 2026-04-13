@@ -32,15 +32,5 @@
         "src/content/content.tsx"
       ]
     }
-  ],
-  "oauth2": {
-    "client_id": "YOUR_APP_CLIENT_ID_GOES_HERE",
-    "scopes": [
-      "openid",
-      "email",
-      "profile",
-      "https://www.googleapis.com/auth/drive.appdata",
-      "https://www.googleapis.com/auth/drive.file"
-    ]
-  }
+  ]
 }

@@ -5,15 +5,9 @@ import manifest from './manifest.json'
 import path from 'path'
 
 export default defineConfig(({ mode }) => {
-  // Load environment variables from .env files
   const env = loadEnv(mode, process.cwd(), '');
   const isLab = process.env.VITE_APP_TARGET === 'lab';
   const outDir = isLab ? 'lab' : 'support';
-
-  // Select the appropriate client ID based on build target
-  const clientId = isLab 
-    ? env.VITE_LAB_CLIENT_ID 
-    : env.VITE_SUPPORT_CLIENT_ID;
 
   const dynamicManifest = {
     ...manifest,
@@ -21,11 +15,6 @@ export default defineConfig(({ mode }) => {
     description: isLab 
       ? "Troubleshooting and resolution annotations for the LabLabee team." 
       : manifest.description,
-    oauth2: {
-      ...manifest.oauth2,
-      // Fallback to manifest default if .env is missing
-      client_id: clientId || manifest.oauth2.client_id
-    }
   };
 
   return {

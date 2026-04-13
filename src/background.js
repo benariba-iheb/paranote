@@ -47,7 +47,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         type: request.payload.type || "Content Typo",
         labComment: request.payload.labComment || null,
         labFixType: request.payload.labFixType || "Pending",
-        taskContext: request.payload.taskContext || null
+        taskContext: request.payload.taskContext || null,
+        fixedBy: request.payload.fixedBy || null
       };
 
       const existingIndex = db.findIndex(n => n.hash === incomingNote.hash && n.domain === incomingNote.domain);
@@ -69,6 +70,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           labFixType: incomingNote.labFixType  !== null ? incomingNote.labFixType  : existing.labFixType,
           // Authorship: keep original author, always update last modifier
           lastModifiedBy: authorName,
+          // Fixed-by: stamp the current user when a lab resolution is applied
+          fixedBy: incomingNote.labFixType && incomingNote.labFixType !== 'Pending'
+            ? authorName
+            : (existing.fixedBy || null),
         };
       } else {
         incomingNote.author = authorName;
@@ -122,23 +127,44 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // CHECK_AUTH — verify the signed-in Google account is on the allowlist
   if (request.action === "CHECK_AUTH") {
-    // Remove any cached token first so the user always sees the full scope-grant screen.
-    // This ensures drive.file is included — a cached token from before Drive scopes
-    // were added would silently omit them and cause 403 errors on backup.
-    chrome.identity.getAuthToken({ interactive: false }, (oldToken) => {
-      if (oldToken) {
-        chrome.identity.removeCachedAuthToken({ token: oldToken }, () => doAuth());
-      } else {
-        doAuth();
+    chrome.storage.local.get(['clientId'], (result) => {
+      const clientId = result.clientId;
+      if (!clientId) {
+        sendResponse({ success: false, allowed: false, error: 'no_client_id' });
+        return;
       }
+      doAuth(clientId);
     });
 
-    function doAuth() {
-      chrome.identity.getAuthToken({ interactive: true }, async (token) => {
-        if (chrome.runtime.lastError || !token) {
-          sendResponse({ success: false, allowed: false, error: 'no_token' });
+    function doAuth(clientId) {
+      const redirectUri = chrome.identity.getRedirectURL();
+      const scopes = encodeURIComponent([
+        "openid",
+        "email",
+        "profile",
+        "https://www.googleapis.com/auth/drive"
+      ].join(' '));
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&response_type=token&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes}&prompt=consent`;
+
+      chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: true }, async (redirectUrl) => {
+        if (chrome.runtime.lastError || !redirectUrl) {
+          sendResponse({ success: false, allowed: false, error: 'no_token', detail: chrome.runtime.lastError?.message });
           return;
         }
+        
+        // Extract token from redirect URL hash part (#access_token=...)
+        const urlHash = redirectUrl.split('#')[1];
+        const params = new URLSearchParams(urlHash);
+        const token = params.get('access_token');
+        
+        if (!token) {
+          sendResponse({ success: false, allowed: false, error: 'parsing_failed' });
+          return;
+        }
+
+        // Cache the token manually so DriveSyncEngine can use it without prompting
+        chrome.storage.local.set({ authToken: token });
+
         try {
           const profile = await DriveSyncEngine.getUserProfile(token);
           const email = profile.email.toLowerCase();
@@ -159,15 +185,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  // SIGN_OUT — revoke token and clear cached user
+  // SIGN_OUT — clear cached user and token
   if (request.action === "SIGN_OUT") {
-    chrome.identity.getAuthToken({ interactive: false }, (token) => {
-      if (token) {
-        chrome.identity.removeCachedAuthToken({ token }, () => {
-          fetch(`https://accounts.google.com/o/oauth2/revoke?token=${token}`);
-        });
-      }
-      chrome.storage.local.remove('authUser');
+    chrome.storage.local.get(['authToken'], (res) => {
+      if (res.authToken) fetch(`https://accounts.google.com/o/oauth2/revoke?token=${res.authToken}`);
+      chrome.storage.local.remove(['authUser', 'authToken']);
       sendResponse({ success: true });
     });
     return true;
@@ -193,29 +215,46 @@ class DriveSyncEngine {
     return res;
   }
 
-  // 1. Get OAuth Token — always flushes stale cache to avoid 401 "Invalid Credentials"
+  // 1. Get OAuth Token — relies on the token cached by CHECK_AUTH
   static async getToken() {
     return new Promise((resolve, reject) => {
-      // Step 1: check for a cached token (non-interactive, so no popup)
-      chrome.identity.getAuthToken({ interactive: false }, (staleToken) => {
-        const fetchFreshToken = () => {
-          // Step 2: get a new valid token (interactive only if truly needed)
-          chrome.identity.getAuthToken({ interactive: true }, (token) => {
-            if (chrome.runtime.lastError || !token) {
+      chrome.storage.local.get(['authToken', 'clientId'], (result) => {
+        if (result.authToken) {
+          resolve(result.authToken);
+        } else if (!result.clientId) {
+          reject(new Error("No Client ID configured"));
+        } else {
+          // If for some reason Drive Sync needs a token, allow interactive flow
+          // because backup/restore are manual user actions triggered from the popup.
+          const redirectUri = chrome.identity.getRedirectURL();
+          const scopes = encodeURIComponent(["openid", "email", "profile", "https://www.googleapis.com/auth/drive"].join(' '));
+          const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${result.clientId}&response_type=token&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes}&prompt=none`;
+          
+          chrome.identity.launchWebAuthFlow({ url: authUrl, interactive: true }, (redirectUrl) => {
+            if (chrome.runtime.lastError || !redirectUrl) {
               reject(chrome.runtime.lastError || new Error('No token returned'));
             } else {
-              resolve(token);
+              const urlHash = redirectUrl.split('#')[1];
+              const params = new URLSearchParams(urlHash);
+              const token = params.get('access_token');
+              if (token) {
+                chrome.storage.local.set({ authToken: token });
+                resolve(token);
+              } else {
+                reject(new Error('Failed to parse token'));
+              }
             }
           });
-        };
-
-        if (staleToken) {
-          // Remove the potentially expired token from Chrome's local cache,
-          // then request a fresh one. No popup appears if the user session is active.
-          chrome.identity.removeCachedAuthToken({ token: staleToken }, fetchFreshToken);
-        } else {
-          fetchFreshToken();
         }
+      });
+    });
+  }
+
+  // 1c. Get the configured Shared Folder ID
+  static async getSharedFolderId() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(['folderId'], (result) => {
+        resolve(result.folderId || null);
       });
     });
   }
@@ -229,10 +268,12 @@ class DriveSyncEngine {
     return res.json(); // { email, name, picture, ... }
   }
 
-  // 2. Find the hidden file in the appDataFolder
+  // 2. Find the sync file in the Shared Drive Folder
   static async getFileId(token) {
-    const query = encodeURIComponent(`name='${DRIVE_FILE_NAME}' and 'appDataFolder' in parents`);
-    const response = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}&spaces=appDataFolder`, {
+    const parentId = await this.getSharedFolderId();
+    if (!parentId || parentId.trim() === '.' || parentId.trim() === '') throw new Error("Invalid Shared Folder ID configured");
+    const query = encodeURIComponent(`name='${DRIVE_FILE_NAME}' and '${parentId}' in parents and trashed=false`);
+    const response = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}&supportsAllDrives=true&includeItemsFromAllDrives=true`, {
       method: 'GET',
       headers: { 'Authorization': `Bearer ${token}` }
     });
@@ -240,11 +281,13 @@ class DriveSyncEngine {
     return data.files && data.files.length > 0 ? data.files[0].id : null;
   }
 
-  // 3. Create the file if it doesn't exist
+  // 3. Create the file if it doesn't exist inside the Shared Drive Folder
   static async createFile(token) {
+    const parentId = await this.getSharedFolderId();
+    if (!parentId || parentId.trim() === '.' || parentId.trim() === '') throw new Error("Invalid Shared Folder ID configured");
     const metadata = {
       name: DRIVE_FILE_NAME,
-      parents: ['appDataFolder']
+      parents: [parentId]
     };
     const response = await fetch('https://www.googleapis.com/drive/v3/files', {
       method: 'POST',
@@ -260,8 +303,8 @@ class DriveSyncEngine {
 
   // 4. CSV Conversion
   static convertIssuesToCSV(issuesArray) {
-    if (!issuesArray || issuesArray.length === 0) return "Content,Issue Type,Subchallenge,Screenshot,Hash,Lab Fix Type,Lab Comment,Author,Last Modified By\n";
-    const headers = ["Content", "Issue Type", "Subchallenge", "Screenshot", "Hash", "Lab Fix Type", "Lab Comment", "Author", "Last Modified By"];
+    if (!issuesArray || issuesArray.length === 0) return "Content,Issue Type,Subchallenge,Screenshot,Hash,Lab Fix Type,Lab Comment,Created By,Last Edited By,Fixed By\n";
+    const headers = ["Content", "Issue Type", "Subchallenge", "Screenshot", "Hash", "Lab Fix Type", "Lab Comment", "Created By", "Last Edited By", "Fixed By"];
     const lines = [headers.join(',')];
     issuesArray.forEach(issue => {
       const type = `"${(issue.type || "").replace(/"/g, '""')}"`;
@@ -274,15 +317,16 @@ class DriveSyncEngine {
       const labComment = `"${(issue.labComment || "").replace(/"/g, '""')}"`;
       const author = `"${(issue.author || "").replace(/"/g, '""')}"`;
       const lastModifiedBy = `"${(issue.lastModifiedBy || "").replace(/"/g, '""')}"`;
-      lines.push([content, type, context, screenshot, hash, labFixType, labComment, author, lastModifiedBy].join(','));
+      const fixedBy = `"${(issue.fixedBy || "").replace(/"/g, '""')}"`;
+      lines.push([content, type, context, screenshot, hash, labFixType, labComment, author, lastModifiedBy, fixedBy].join(','));
     });
     return lines.join('\n');
   }
 
   // 5. Notes CSV Conversion
   static convertNotesToCSV(notesArray) {
-    if (!notesArray || notesArray.length === 0) return "Content,Context,Screenshot,Hash,Author,Last Modified By\n";
-    const headers = ["Content", "Context", "Screenshot", "Hash", "Author", "Last Modified By"];
+    if (!notesArray || notesArray.length === 0) return "Content,Context,Screenshot,Hash,Created By,Last Edited By\n";
+    const headers = ["Content", "Context", "Screenshot", "Hash", "Created By", "Last Edited By"];
     const lines = [headers.join(',')];
     notesArray.forEach(note => {
       const content = `"${(note.content || "").replace(/"/g, '""')}"`;
@@ -328,9 +372,10 @@ class DriveSyncEngine {
 
   // 5. Get or Create Visible Folder
   static async getOrCreateFolder(token, folderName, parentId = null) {
+    if (parentId && parentId.trim() === '.') throw new Error("Invalid Shared Folder ID configured");
     const parentQuery = parentId ? ` and '${parentId}' in parents` : "";
     const query = encodeURIComponent(`mimeType='application/vnd.google-apps.folder' and name='${folderName}' and trashed=false${parentQuery}`);
-    const res = await this.driveRequest(`https://www.googleapis.com/drive/v3/files?q=${query}`, {
+    const res = await this.driveRequest(`https://www.googleapis.com/drive/v3/files?q=${query}&supportsAllDrives=true&includeItemsFromAllDrives=true`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     const data = await res.json();
@@ -352,7 +397,7 @@ class DriveSyncEngine {
   // 6. Get or Create Visible CSV File
   static async getOrCreateCsvFile(token, folderId, fileName) {
     const query = encodeURIComponent(`name='${fileName}' and '${folderId}' in parents and trashed=false`);
-    const res = await this.driveRequest(`https://www.googleapis.com/drive/v3/files?q=${query}`, {
+    const res = await this.driveRequest(`https://www.googleapis.com/drive/v3/files?q=${query}&supportsAllDrives=true&includeItemsFromAllDrives=true`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     const data = await res.json();
@@ -371,7 +416,7 @@ class DriveSyncEngine {
   // 7. Extract Image to Drive
   static async uploadImageToDrive(token, baseDataUri, fileName, folderId) {
     const query = encodeURIComponent(`name='${fileName}' and '${folderId}' in parents and trashed=false`);
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}`, {
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}&supportsAllDrives=true&includeItemsFromAllDrives=true`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     const data = await res.json();
@@ -404,7 +449,9 @@ class DriveSyncEngine {
   // 8. Universal Export Pipeline
   static async exportDataCategory(token, dataArray, rootFolderName, fileNamePrefix, conversionFunction, xlsxConversionFunction) {
       console.log(`ParaNote: Exporting to /${rootFolderName}/ folder...`);
-      const rootFolderId = await this.getOrCreateFolder(token, rootFolderName);
+      const parentId = await this.getSharedFolderId();
+      if (!parentId) throw new Error("Shared Folder ID not configured");
+      const rootFolderId = await this.getOrCreateFolder(token, rootFolderName, parentId);
 
       const groupedData = {};
       for (let item of dataArray) {
