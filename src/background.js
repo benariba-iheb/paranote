@@ -82,9 +82,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
 
       if (isNote) {
-        chrome.storage.local.set({ notesDatabase: db }, () => sendResponse({ success: true }));
+        chrome.storage.local.set({ notesDatabase: db, unsavedChanges: true }, () => sendResponse({ success: true }));
       } else {
-        chrome.storage.local.set({ issuesDatabase: db }, () => sendResponse({ success: true }));
+        chrome.storage.local.set({ issuesDatabase: db, unsavedChanges: true }, () => sendResponse({ success: true }));
       }
     });
 
@@ -104,7 +104,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       } else {
         issuesDb = issuesDb.filter(n => !(n.hash === request.hash && n.domain === domain));
       }
-      chrome.storage.local.set({ notesDatabase: notesDb, issuesDatabase: issuesDb }, () => {
+      chrome.storage.local.set({ notesDatabase: notesDb, issuesDatabase: issuesDb, unsavedChanges: true }, () => {
         sendResponse({ success: true });
       });
     });
@@ -122,6 +122,39 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // Trigger a manual restore from the cloud
   if (request.action === "RESTORE_FROM_CLOUD") {
     DriveSyncEngine.restoreFromDrive().then(success => sendResponse({ success }));
+    return true;
+  }
+
+  // Trigger automatic restore periodically
+  if (request.action === "RESTORE_FROM_CLOUD_AUTO") {
+    chrome.storage.local.get(['unsavedChanges', 'lastAutoSync'], (result) => {
+      // 1. Skip if unsaved modifications exist (per Option A)
+      if (result.unsavedChanges) {
+        sendResponse({ success: false, reason: "unsaved_changes" });
+        return;
+      }
+      
+      // 2. Throttle (debounce globally across all tabs) to max once every 14 seconds
+      const now = Date.now();
+      if (result.lastAutoSync && (now - result.lastAutoSync) < 14000) {
+        sendResponse({ success: false, reason: "throttled" });
+        return;
+      }
+
+      chrome.storage.local.set({ lastAutoSync: now }, () => {
+        DriveSyncEngine.restoreFromDrive().then(success => {
+          if (success) {
+            // Notify tabs if there are potentially new notes to render
+            chrome.tabs.query({}, (tabs) => {
+              tabs.forEach(t => {
+                if (t.id) chrome.tabs.sendMessage(t.id, { action: "AUTO_SYNC_COMPLETED" }).catch(() => {});
+              });
+            });
+          }
+          sendResponse({ success });
+        });
+      });
+    });
     return true;
   }
 
@@ -548,6 +581,7 @@ class DriveSyncEngine {
       });
 
       console.log("ParaNote: Backup Successful! ✅");
+      await chrome.storage.local.set({ unsavedChanges: false });
       return true;
     } catch (error) {
       console.error("ParaNote Drive Backup Failed:", error);
@@ -577,12 +611,13 @@ class DriveSyncEngine {
       // Legacy migration check: if the remote data is an Array, assume they are all issues
       if (Array.isArray(remoteData)) {
         console.log("ParaNote: Migrating legacy backup format into issuesDatabase...");
-        await chrome.storage.local.set({ issuesDatabase: remoteData, notesDatabase: [] });
+        await chrome.storage.local.set({ issuesDatabase: remoteData, notesDatabase: [], unsavedChanges: false });
       } else {
         // New format
         await chrome.storage.local.set({
           notesDatabase: remoteData.notes || [],
-          issuesDatabase: remoteData.issues || []
+          issuesDatabase: remoteData.issues || [],
+          unsavedChanges: false
         });
       }
 

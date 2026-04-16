@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from "react"
 import { createPortal } from "react-dom"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Textarea } from "@/components/ui/textarea"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Button } from "../../components/ui/button"
+import { Card, CardContent } from "../../components/ui/card"
+import { Badge } from "../../components/ui/badge"
+import { Textarea } from "../../components/ui/textarea"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select"
 import { X, ChevronDown, ChevronUp, CheckCircle } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn } from "../../lib/utils"
 
 const isLab = import.meta.env.VITE_APP_TARGET === 'lab';
 
@@ -36,9 +36,9 @@ export function NoteCard({
   const [isManuallyExpanded, setIsManuallyExpanded] = useState(false)
   const [isOverlayActive, setIsOverlayActive] = useState(false)
   const [isTruncatable, setIsTruncatable] = useState(false)
-  // Lab-specific: collapse the whole card body to just the header.
-  // Defaults to collapsed in lab mode so all issue cards start as compact headers.
-  const [isCardCollapsed, setIsCardCollapsed] = useState(isLab && noteType !== "Note")
+  // Collapse the whole card body to just the header for all issues.
+  // Defaults to collapsed so all issue cards start as compact headers.
+  const [isCardCollapsed, setIsCardCollapsed] = useState(noteType !== "Note")
 
   // Lab resolution state
   const [labFixType, setLabFixType] = useState<string>(initialLabFixType || "Pending")
@@ -117,16 +117,7 @@ export function NoteCard({
         )}
         style={{ borderLeftColor: typeColor }}
       >
-        {!isLab && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="absolute top-1 right-1 h-6 w-6 text-muted-foreground hover:bg-destructive/20 hover:text-destructive opacity-0 group-hover:opacity-100 transition-all duration-200 hover:scale-110 z-10"
-            onClick={handleDelete}
-          >
-            <X className="h-3 w-3" />
-          </Button>
-        )}
+
 
         <div className="pt-3 px-3 flex items-start justify-between gap-1">
           <div className="flex-1 min-w-0">
@@ -145,18 +136,32 @@ export function NoteCard({
             )}
           </div>
 
-          {/* Card-level collapse toggle — lab view only */}
-          {isLab && isIssue && (
-            <button
-              onClick={() => setIsCardCollapsed(c => !c)}
-              className="shrink-0 mt-0.5 h-5 w-5 flex items-center justify-center rounded text-slate-400 hover:text-white hover:bg-white/10 transition-all duration-150"
-              title={isCardCollapsed ? 'Expand card' : 'Collapse card'}
-            >
-              {isCardCollapsed
-                ? <ChevronDown className="h-3 w-3" />
-                : <ChevronUp className="h-3 w-3" />}
-            </button>
-          )}
+          <div className="flex items-center gap-0.5 shrink-0 mt-0.5">
+            {/* Card-level collapse toggle for all issues */}
+            {isIssue && (
+              <button
+                onClick={() => setIsCardCollapsed(c => !c)}
+                className="h-5 w-5 flex items-center justify-center rounded text-slate-400 hover:text-white hover:bg-white/10 transition-all duration-150"
+                title={isCardCollapsed ? 'Expand card' : 'Collapse card'}
+              >
+                {isCardCollapsed
+                  ? <ChevronDown className="h-3 w-3" />
+                  : <ChevronUp className="h-3 w-3" />}
+              </button>
+            )}
+
+            {/* Delete button (Support app only) */}
+            {!isLab && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-5 w-5 text-muted-foreground hover:bg-destructive/20 hover:text-destructive opacity-0 group-hover:opacity-100 transition-all duration-200 hover:scale-110"
+                onClick={handleDelete}
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* Collapsible body — hidden when card is collapsed in lab view */}

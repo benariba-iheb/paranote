@@ -25,10 +25,7 @@ const NOTE_TYPES = {
   "Content Wrong": "#ff5722",
   "Instance creation": "#795548",
   "Terminal Problem": "#990033ff",
-  "RDP Problem": "#202124",
-  "Issue Fixed": "#4caf50",
-  "Additional Info Required": "#ffeb3b",
-  "No issue here": "#9e9e9e"
+  "RDP Problem": "#202124"
 };
 
 const globalStyles = document.createElement('style');
@@ -437,11 +434,86 @@ let currentHoveredParagraph: HTMLElement | null = null;
 let hideButtonTimeout: ReturnType<typeof setTimeout> | null = null;
 let loadedNotesData: any[] = []; // Store full note objects, not just hashes
 
-function generateTextHash(str: string): string {
-  let hash = 0;
-  if (str.length === 0) return hash.toString(16);
-  for (let i = 0; i < str.length; i++) { hash = (hash << 5) - hash + str.charCodeAt(i); hash |= 0; }
-  return hash.toString(16);
+const cyrb53 = (str: string, seed = 0): string => {
+  let h1 = 0xdeadbeef ^ seed, h2 = 0x41c6ce57 ^ seed;
+  for (let i = 0, ch; i < str.length; i++) {
+    ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16);
+};
+
+function getXPath(node: Node): string {
+  if (node.nodeType === Node.DOCUMENT_NODE) return '';
+
+  const parent = node.parentNode;
+  if (!parent) return '';
+
+  const siblings = Array.from(parent.childNodes).filter(
+    child => child.nodeType === node.nodeType && (child as Element).tagName === (node as Element).tagName
+  );
+  const index = siblings.indexOf(node as ChildNode) + 1;
+  const tagName = (node as Element).tagName.toLowerCase();
+  const path = getXPath(parent);
+
+  return path + '/' + tagName + (siblings.length > 1 ? '[' + index + ']' : '');
+}
+
+function getParagraphHashes(element: HTMLElement): string[] {
+  const textContent = element.textContent ? element.textContent.trim() : '';
+
+  const xpath = getXPath(element);
+  const textPrefix = textContent.substring(0, 50);
+  const id = element.id || '';
+
+  // Strip extension-added classes for stable hashing
+  const rawClass = typeof element.className === 'string' ? element.className : (element.getAttribute('class') || '');
+  const className = rawClass.replace('paranote-highlighted', '').replace(/\s+/g, ' ').trim();
+
+  const combinedStableString = `${xpath}|${textPrefix}|${id}|${className}`;
+
+  const stableHash = cyrb53(combinedStableString);
+  const textHash = cyrb53(textContent);
+
+  let legacyStableHashNum = 0;
+  for (let i = 0; i < combinedStableString.length; i++) {
+    legacyStableHashNum = (legacyStableHashNum << 5) - legacyStableHashNum + combinedStableString.charCodeAt(i);
+    legacyStableHashNum |= 0;
+  }
+  const legacyStableHash = legacyStableHashNum.toString(16);
+
+  let legacyTextHashNum = 0;
+  let legacyTextHash = "0";
+  if (textContent.length === 0) {
+    legacyTextHash = (0).toString(16);
+  } else {
+    for (let i = 0; i < textContent.length; i++) {
+      legacyTextHashNum = (legacyTextHashNum << 5) - legacyTextHashNum + textContent.charCodeAt(i);
+      legacyTextHashNum |= 0;
+    }
+    legacyTextHash = legacyTextHashNum.toString(16);
+  }
+
+  return [stableHash, textHash, legacyStableHash, legacyTextHash];
+}
+
+function generateStableHash(element: HTMLElement): string {
+  return getParagraphHashes(element)[0];
+}
+
+function findNoteByHash(element: HTMLElement, notesList: any[]): any | null {
+  const hashes = getParagraphHashes(element);
+  for (const hash of hashes) {
+    const match = notesList.find(note => note.hash === hash);
+    if (match) {
+      console.log(`ParaNote: Match found! Hash: ${hash}`);
+      return match;
+    }
+  }
+  return null;
 }
 
 // --- The Hover Handlers (Add Note Button) ---
@@ -460,8 +532,8 @@ function handleMouseOver(event: MouseEvent) {
   currentHoveredParagraph = paragraph;
 
   // 1. Calculate the hash immediately to check for existing notes
-  const textHash = generateTextHash(paragraph.textContent.trim());
-  const existingNote = loadedNotesData.find(note => note.hash === textHash);
+  const existingNote = findNoteByHash(paragraph, loadedNotesData);
+  const textHash = existingNote ? existingNote.hash : generateStableHash(paragraph);
 
   // Option A Enforced: Lab team cannot log new issues, only fix existing ones
   if (!existingNote && isLab && appAddingMode !== 'note') return;
@@ -510,11 +582,24 @@ function handleMouseOut(event: MouseEvent) {
 // --- Highlight Function (Adds .paranote-highlighted class) ---
 function applyHighlights(notesList: any[]) {
   if (!notesList || notesList.length === 0) return;
+
+  // Create maps for both hash types
   const notesMap = new Map(notesList.map((note: any) => [note.hash, note]));
+
   document.querySelectorAll('p').forEach(p => {
-    const hash = generateTextHash(p.textContent.trim());
-    if (notesMap.has(hash)) {
-      const noteData = notesMap.get(hash) as any;
+    const element = p as HTMLElement;
+
+    let noteData = null;
+    const hashes = getParagraphHashes(element);
+    for (const hash of hashes) {
+      if (notesMap.has(hash)) {
+        noteData = notesMap.get(hash);
+        console.log(`ParaNote: Highlight Match for hash ${hash}`);
+        break;
+      }
+    }
+
+    if (noteData) {
       p.classList.add('paranote-highlighted');
       (p as HTMLElement).style.setProperty('border-left-color', NOTE_TYPES[noteData.type as keyof typeof NOTE_TYPES] || '#34a853', 'important');
       if (noteData.type === "Note") {
@@ -564,6 +649,18 @@ chrome.runtime.onMessage.addListener((request, _sender: unknown, sendResponse) =
     sendResponse({ success: true });
   } else if (request.action === "STOP_APP") {
     stopApp();
+    sendResponse({ success: true });
+  } else if (request.action === "AUTO_SYNC_COMPLETED") {
+    // Only update highlights quietly, do not destroy and rebuild cards so we don't interrupt typing
+    chrome.runtime.sendMessage({ action: "FETCH_NOTES_FOR_URL" }, (response) => {
+      if (response && response.success) {
+        const mode = isViewModeActive ? appViewingMode : appAddingMode;
+        if (mode) {
+          loadedNotesData = response.notes.filter((n: any) => mode === 'note' ? n.type === "Note" : n.type !== "Note");
+          applyHighlights(loadedNotesData);
+        }
+      }
+    });
     sendResponse({ success: true });
   }
 });
@@ -715,10 +812,19 @@ function showNotesOnPage(mode: string) {
 
       // Scan the DOM for paragraphs matching the hashes
       document.querySelectorAll('p').forEach(p => {
-        const hash = generateTextHash(p.textContent.trim());
-        if (notesMap.has(hash)) {
-          // WE FOUND A MATCH!
-          const noteData = notesMap.get(hash);
+        const element = p as HTMLElement;
+
+        let noteData = null;
+        const hashes = getParagraphHashes(element);
+        for (const hash of hashes) {
+          if (notesMap.has(hash)) {
+            noteData = notesMap.get(hash);
+            break;
+          }
+        }
+
+        if (noteData) {
+          console.log(`ParaNote: Display Card Match for hash ${noteData.hash}`);
           new ParaNoteDisplay(noteData, p);
         }
       });
@@ -768,7 +874,9 @@ window.addEventListener('paranote-deleted', (e) => {
 
   // Remove highlight
   document.querySelectorAll('p').forEach(p => {
-    if (generateTextHash(p.textContent.trim()) === hash) {
+    const element = p as HTMLElement;
+    const hashes = getParagraphHashes(element);
+    if (hashes.includes(hash)) {
       p.classList.remove('paranote-highlighted');
       p.style.removeProperty('border-left-color');
       p.style.removeProperty('background-color');
@@ -829,3 +937,29 @@ function extractCurrentTaskAndSubtask() {
 
   return { activeTask, activeSubtask, labName };
 }
+
+// ==========================================
+// 5. Automatic Sync & Unload Tracking
+// ==========================================
+let UIHasUnsavedChanges = false;
+chrome.storage.local.get(['unsavedChanges'], (res) => {
+  UIHasUnsavedChanges = !!res.unsavedChanges;
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.unsavedChanges !== undefined) {
+    UIHasUnsavedChanges = !!changes.unsavedChanges.newValue;
+  }
+});
+
+window.addEventListener('beforeunload', (e) => {
+  if (UIHasUnsavedChanges) {
+    e.preventDefault();
+    e.returnValue = 'You have unsaved changes. Please backup to Drive before leaving.';
+    return e.returnValue;
+  }
+});
+
+setInterval(() => {
+  chrome.runtime.sendMessage({ action: "RESTORE_FROM_CLOUD_AUTO" });
+}, 15000);

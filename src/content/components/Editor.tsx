@@ -1,9 +1,10 @@
 import { useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { Textarea } from "@/components/ui/textarea"
-import { Trash2, CheckCircle, XCircle } from "lucide-react"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Button } from "../../components/ui/button"
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "../../components/ui/card"
+import { Textarea } from "../../components/ui/textarea"
+import { Trash2, CheckCircle, XCircle, Search, ChevronDown, ChevronUp } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select"
+import { Input } from "../../components/ui/input"
 
 const isLab = import.meta.env.VITE_APP_TARGET === 'lab';
 
@@ -22,10 +23,7 @@ const ISSUE_TYPES = {
   "Content Wrong": "#ff5722",
   "Instance creation": "#795548",
   "Terminal Problem": "#990033ff",
-  "RDP Problem": "#202124",
-  "Issue Fixed": "#4caf50",
-  "Additional Info Required": "#ffeb3b",
-  "No issue here": "#9e9e9e"
+  "RDP Problem": "#202124"
 };
 
 const LAB_RESOLUTION_TYPES = {
@@ -50,6 +48,9 @@ export function EditorOverlay({
 
   const [labComment, setLabComment] = useState(existingNote?.labComment || "")
   const [labFixType, setLabFixType] = useState(existingNote?.labFixType || "Issue Fixed")
+
+  const [searchTerm, setSearchTerm] = useState("")
+  const [isListOpen, setIsListOpen] = useState(false)
 
   const handlePaste = (e: any) => {
     const items = e.clipboardData.items
@@ -126,21 +127,65 @@ export function EditorOverlay({
             />
           </>
         ) : mode !== "note" ? (
-          <Select value={type} onValueChange={setType}>
-            <SelectTrigger className={`w-full text-xs h-8 text-white ${isLab ? "bg-[#1e293b] border-[#334155]" : "bg-[#2a2a2a] border-none"}`}>
-              <SelectValue placeholder="Select Issue Type" />
-            </SelectTrigger>
-            <SelectContent className={`z-[2147483647] text-white max-h-[250px] ${isLab ? "bg-[#0f172a] border-[#1e293b]" : "bg-[#1a1a1a] border-[#333]"}`}>
-              {Object.entries(ISSUE_TYPES).map(([label, color]) => (
-                <SelectItem key={label} value={label}>
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full border border-white/20 shrink-0" style={{ backgroundColor: color as string }} />
-                    <span className="truncate">{label}</span>
-                  </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="relative">
+            <div className="flex gap-1 items-center mb-1">
+              {/* Mini-dropdown button on the left */}
+              <Button
+                variant="ghost"
+                size="icon"
+                className={`h-8 w-8 shrink-0 ${isLab ? "bg-[#1e293b] border border-[#334155]" : "bg-[#2a2a2a]"}`}
+                onClick={() => setIsListOpen(!isListOpen)}
+              >
+                {isListOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </Button>
+
+              {/* Search input / Current selection display */}
+              <div className="relative flex-1">
+                <Input
+                  placeholder="Search issue type..."
+                  className={`w-full text-xs h-8 pl-8 pr-2 text-white ${isLab ? "bg-[#1e293b] border-[#334155]" : "bg-[#2a2a2a] border-none"}`}
+                  value={isListOpen ? searchTerm : (searchTerm || type)}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    if (!isListOpen) setIsListOpen(true);
+                  }}
+                  onFocus={() => {
+                    setIsListOpen(true);
+                    setSearchTerm("");
+                  }}
+                />
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              </div>
+            </div>
+
+            {isListOpen && (
+              <div className={`absolute left-0 right-0 top-full mt-1 z-[2147483647] rounded-md border shadow-xl overflow-hidden ${isLab ? "bg-[#0f172a] border-[#1e293b]" : "bg-[#1a1a1a] border-[#333]"}`}>
+                <div className="max-h-[200px] overflow-y-auto p-1 custom-scrollbar">
+                  {Object.entries(ISSUE_TYPES)
+                    .filter(([label]) => label.toLowerCase().includes(searchTerm.toLowerCase()))
+                    .map(([label, color]) => (
+                      <div
+                        key={label}
+                        className={`flex items-center gap-2 px-3 py-2 text-xs cursor-pointer rounded-sm hover:bg-white/10 transition-colors ${type === label ? "bg-white/5" : ""}`}
+                        onClick={() => {
+                          setType(label);
+                          setIsListOpen(false);
+                          setSearchTerm("");
+                        }}
+                      >
+                        <div className="w-3 h-3 rounded-full border border-white/20 shrink-0" style={{ backgroundColor: color as string }} />
+                        <span className="truncate">{label}</span>
+                      </div>
+                    ))}
+                  {Object.entries(ISSUE_TYPES).filter(([label]) => label.toLowerCase().includes(searchTerm.toLowerCase())).length === 0 && (
+                    <div className="px-3 py-4 text-center text-xs text-muted-foreground italic">
+                      No matching types found
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         ) : null}
 
         {!(isLab && mode !== "note" && existingNote) && (
