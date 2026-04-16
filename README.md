@@ -1,5 +1,4 @@
-https://img.shields.io/github/commit-activity/m/BENARIBA-Iheb/paranote | https://img.shields.io/github/repo-size/BENARIBA-Iheb/paranote
-
+![GitHub commit activity](https://img.shields.io/github/commit-activity/y/BENARIBA-Iheb/paranote) | ![GitHub repo size](https://img.shields.io/github/repo-size/BENARIBA-Iheb/PARANOTE)
 
 # ParaNote (formerly LBLI-QT)
 
