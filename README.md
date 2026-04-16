@@ -1,3 +1,6 @@
+https://img.shields.io/github/commit-activity/m/BENARIBA-Iheb/paranote | https://img.shields.io/github/repo-size/BENARIBA-Iheb/paranote
+
+
 # ParaNote (formerly LBLI-QT)
 
 ParaNote is a powerful Chrome Extension designed for teams working on LabLabee learning content. it allows users to take notes and log content issues directly on laboratory paragraphs, with seamless synchronization to Google Drive.
