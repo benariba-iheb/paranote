@@ -1,9 +1,5 @@
 ![GitHub commit activity](https://img.shields.io/github/commit-activity/y/BENARIBA-Iheb/paranote) | ![GitHub repo size](https://img.shields.io/github/repo-size/BENARIBA-Iheb/PARANOTE)
 
-
-<img width="1918" height="983" alt="LBLI_QT_support" src="https://github.com/user-attachments/assets/f9b8ede2-6609-458e-bf4a-e70245a20bd6" />
-<img width="1918" height="983" alt="LBLI_QT_lab" src="https://github.com/user-attachments/assets/ac080b83-ecc4-499b-971a-29193db35374" />
-
 # ParaNote (formerly LBLI-QT)
 
 ParaNote is a powerful Chrome Extension designed for teams working on LabLabee learning content. it allows users to take notes and log content issues directly on laboratory paragraphs, with seamless synchronization to Google Drive.
@@ -68,6 +64,9 @@ ParaNote is a powerful Chrome Extension designed for teams working on LabLabee l
 2. **Annotate**: Hover over any paragraph on LabLabee pages to see the "Take Note" or "Log Issue" trigger.
 3. **View**: Toggle "View Notes on Page" from the popup to see all annotations anchored in place.
 4. **Sync**: Use the "Backup to Drive" button to publish your changes or allow the 15s auto-sync to pull team updates.
+
+<img width="1918" height="983" alt="LBLI_QT_support" src="https://github.com/user-attachments/assets/f9b8ede2-6609-458e-bf4a-e70245a20bd6" />
+<img width="1918" height="983" alt="LBLI_QT_lab" src="https://github.com/user-attachments/assets/ac080b83-ecc4-499b-971a-29193db35374" />
 
 ---
 
