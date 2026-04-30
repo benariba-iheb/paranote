@@ -1,3 +1,5 @@
+<img width="1918" height="983" alt="LBLI_QT_support" src="https://github.com/user-attachments/assets/f9b8ede2-6609-458e-bf4a-e70245a20bd6" />
+<img width="1918" height="983" alt="LBLI_QT_lab" src="https://github.com/user-attachments/assets/ac080b83-ecc4-499b-971a-29193db35374" />
 ![GitHub commit activity](https://img.shields.io/github/commit-activity/y/BENARIBA-Iheb/paranote) | ![GitHub repo size](https://img.shields.io/github/repo-size/BENARIBA-Iheb/PARANOTE)
 
 # ParaNote (formerly LBLI-QT)
